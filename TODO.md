@@ -3,6 +3,7 @@
 > (GitHub issue #1). The per-node feasibility notes below are the source of truth that map's
 > tickets design against.
 
+- [ ] **Deferred — Alert Manager row drag polish (#92):** native `dragConfig` is horizontal-only; hybrid on `wip/drag-rows` is finicky (gesture start, ghost Y offset, drops). Full notes + recommended next pass: [`docs/deferred/alert-manager-row-drag.md`](docs/deferred/alert-manager-row-drag.md).
 - [ ] 1. consolidate the comparison nodes into one with a dropdown selector for the operation. it's clutter to have 6 different nodes to just change the operation between two numbers. ([#64](https://github.com/adamk33n3r/rs3-Watchdog/issues/64))
 - [ ] 2. By default, exec IN pins allow more than one connection but can be configured to only allow a single connection ([#65](https://github.com/adamk33n3r/rs3-Watchdog/issues/65))
 - [x] 3. Right now you can create multiple duplicate connections. If you try to create a connection that already exists, treat that as the user wanting to remove that existing connection. _(Engine: `Connect` now returns `id` or `nil, reason` — uniform result contract, no asserts — and rejects exact-duplicate edges (`"duplicate"`, checked before `"data_input_occupied"`); new `Graph:FindConnection`. Editor `linkPins`: identical wire → toggle off (uniform exec+data); different-source data occupant → replace.)_

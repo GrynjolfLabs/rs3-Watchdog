@@ -36,14 +36,77 @@ Manager.__index = Manager
 -- PrettyUI Tabs uses TAB_BASELINE ≈ 42 for the tab header strip (see prettyui/src/tabs.lua).
 local TAB_BASELINE = 42
 local ROW_H       = 22    -- one tree row
+local HANDLE_W    = 16    -- drag-grip column (prototype ⠿; ASCII "::" — RS font lacks braille)
 local ENABLE_W    = 22    -- enable toggle width
-local ACT_W       = 64    -- ren/del action button width
+local ACT_W       = 70    -- ren/del width; must fit "Rename"/"Delete" + stylesheet chrome
 local ROW_GAP     = 2     -- gap between controls inside a row
+local ROW_SLACK   = 4     -- keep horizontal auto-layout from wrapping the trailing actions
 local PAGE_PAD    = 8     -- inset from content edge for the tree
 local TOOLBAR_H   = 27    -- PrettyUI FancyButton height
 local TOOLBAR_PAD = 8     -- right inset for + Alert / + Group on the tab strip
 local TOOLBAR_GAP = 6     -- gap between create buttons
 local TREE_TOP    = TAB_BASELINE + 4 -- tree sits below the PrettyUI tab strip
+
+local ROW_DRAG_DELAY_TICKS = 3
+local ROW_DRAG_DEAD_ZONE   = 6
+
+local function mouseScreenPos()
+    local mx, my = nil, nil
+    pcall(function()
+        if Mouse == nil then return end
+        if Mouse.GetPosition ~= nil then
+            local pos = Mouse.GetPosition()
+            if pos ~= nil then
+                mx, my = pos.x, pos.y
+                return
+            end
+        end
+        if Mouse.GetX ~= nil then mx = Mouse.GetX() end
+        if Mouse.GetY ~= nil then my = Mouse.GetY() end
+    end)
+    return mx, my
+end
+
+-- Absolute screen origin of a component (Mouse is screen-space). Prefer PrettyUI's tooltip
+-- context resolver; fall back to raw .x/.y (parent-local — wrong for drop math if used alone).
+---@param comp ui.Component|nil
+---@return number, number
+local function componentScreenPos(comp)
+    local x, y = 0, 0
+    if comp == nil then return x, y end
+    pcall(function()
+        if prettyui ~= nil and prettyui.Tooltip ~= nil and prettyui.Tooltip.getContext ~= nil then
+            local ctx = prettyui.Tooltip.getContext(comp)
+            if ctx ~= nil and type(ctx.position) == "function" then
+                local ax, ay = ctx.position(comp)
+                if ax ~= nil then x = ax end
+                if ay ~= nil then y = ay end
+                return
+            end
+        end
+        x = comp.x or 0
+        y = comp.y or 0
+    end)
+    return x, y
+end
+
+-- Temporary in-client probe (#92 drag diagnosis). Read via PluginData.db key watchdog_drag_probe.
+local DRAG_PROBE_KEY = "watchdog_drag_probe"
+local dragProbeLog = {}
+local function dragProbe(msg)
+    dragProbeLog[#dragProbeLog + 1] = tostring(msg)
+    if #dragProbeLog > 40 then
+        table.remove(dragProbeLog, 1)
+    end
+    pcall(function()
+        if PersistentDB ~= nil then
+            PersistentDB:SetString(DRAG_PROBE_KEY, table.concat(dragProbeLog, "\n"))
+        end
+    end)
+    if log ~= nil then
+        log("Watchdog drag: " .. tostring(msg))
+    end
+end
 
 
 -- A scope descriptor the injected provider hands back: which Bucket, how to label its tab, and its
@@ -134,6 +197,7 @@ function Manager.new(opts)
         expandVersion = 0,          -- bumped on every toggle, part of the rebuild signature
         mutateVersion = 0,          -- bumped on every row/create mutation (#91) so enable/rename redraw
         dragId = nil,               -- Entry id being dragged (#92), or nil when idle
+        dragVisual = nil,           -- row component we reposition in Y while native drag is X-locked
         pendingScopeDrop = nil,     -- inactive-tab scope key hovered during drag (#92)
         visible = false,
         tick = 0,                   -- Logic-tick counter, for row double-click timing
@@ -358,18 +422,24 @@ function Manager:ApplyDrop(id, target)
 end
 
 -- Resolves mouse screen Y + optional inactive-tab hit into a DropTarget for `dragId`, then
--- ApplyDrop. Used from ONDRAGCOMPLETE on row panels (client half).
+-- ApplyDrop. Used from ONDRAGCOMPLETE on the drag grip (client half).
+-- `endY` is the ONDRAGCOMPLETE payload when the client provides it; otherwise Mouse.GetY().
 ---@param dragId integer
-function Manager:_completeDrag(dragId)
+---@param endY number|nil  # unused; kept for call-site compat. Native endY is always 0.
+function Manager:_completeDrag(dragId, endY)
     self.dragId = nil
+    self.dragVisual = nil
     local scopeDrop = self.pendingScopeDrop
     self.pendingScopeDrop = nil
     local scope = self:ActiveScope()
-    if scope == nil then return end
-    local mouseY = nil
-    pcall(function()
-        if Mouse ~= nil and Mouse.GetY ~= nil then mouseY = Mouse.GetY() end
-    end)
+    if scope == nil then
+        dragProbe("complete: no scope")
+        return
+    end
+    local mouseX, mouseY = mouseScreenPos()
+    local _, treeTop = componentScreenPos(self.treePanel)
+    dragProbe(string.format("complete id=%s mouse=%s,%s treeTop=%s scopeDrop=%s",
+        tostring(dragId), tostring(mouseX), tostring(mouseY), tostring(treeTop), tostring(scopeDrop)))
 
     local subtreeIds = {}
     local found = Store.FindById(scope.doc, dragId)
@@ -377,19 +447,6 @@ function Manager:_completeDrag(dragId)
 
     local rows = {}
     local visible = self:VisibleRows()
-    local treeTop = nil
-    pcall(function()
-        if self.treePanel ~= nil then
-            treeTop = self.treePanel.y or 0
-            if prettyui ~= nil and prettyui.Tooltip ~= nil and prettyui.Tooltip.getContext ~= nil then
-                local ctx = prettyui.Tooltip.getContext(self.treePanel)
-                if ctx ~= nil and type(ctx.position) == "function" then
-                    local _, ay = ctx.position(self.treePanel)
-                    if ay ~= nil then treeTop = ay end
-                end
-            end
-        end
-    end)
     local scroll = 0
     pcall(function()
         local tp = self.treePanel
@@ -406,6 +463,7 @@ function Manager:_completeDrag(dragId)
     if mouseY ~= nil and treeTop ~= nil then
         localY = mouseY - treeTop + scroll
     end
+    dragProbe(string.format("localY=%.1f scroll=%s", localY, tostring(scroll)))
     for i, row in ipairs(visible) do
         rows[#rows + 1] = {
             id = row.id,
@@ -416,8 +474,6 @@ function Manager:_completeDrag(dragId)
             h = ROW_H,
         }
     end
-    -- Prefer the inactive-tab hit subscription (pendingScopeDrop); fall back to geometry poll
-    -- if the tab hover never fired (e.g. drop on the very edge of the tab strip).
     local scopeKey = scopeDrop
     if scopeKey == nil and mouseY ~= nil and #self:ScopeList() > 1 and self.tabs ~= nil then
         local activeKey = self:ActiveScopeKey()
@@ -427,25 +483,14 @@ function Manager:_completeDrag(dragId)
                 pcall(function() tab = self.tabs:GetTab(i) end)
                 local hit = tab and tab.hit
                 if hit ~= nil then
-                    local hx, hy, hw, hh = 0, 0, 0, 0
+                    local hx, hy = componentScreenPos(hit)
+                    local hw, hh = 0, TAB_BASELINE
                     pcall(function()
-                        hx, hy = hit.x or 0, hit.y or 0
-                        if prettyui ~= nil and prettyui.Tooltip ~= nil and prettyui.Tooltip.getContext ~= nil then
-                            local ctx = prettyui.Tooltip.getContext(hit)
-                            if ctx ~= nil and type(ctx.position) == "function" then
-                                local ax, ay = ctx.position(hit)
-                                if ax ~= nil then hx = ax end
-                                if ay ~= nil then hy = ay end
-                            end
-                        end
                         hw = hit.width or 0
                         hh = hit.height or TAB_BASELINE
                     end)
-                    local mx = nil
-                    pcall(function()
-                        if Mouse ~= nil and Mouse.GetX ~= nil then mx = Mouse.GetX() end
-                    end)
-                    if mx ~= nil and mx >= hx and mx <= hx + hw and mouseY >= hy and mouseY <= hy + hh then
+                    if mouseX ~= nil and mouseX >= hx and mouseX <= hx + hw
+                        and mouseY >= hy and mouseY <= hy + hh then
                         scopeKey = s.key
                         break
                     end
@@ -458,6 +503,8 @@ function Manager:_completeDrag(dragId)
         dragSubtreeIds = subtreeIds,
         scopeKey = scopeKey,
     })
+    dragProbe(string.format("target=%s localY=%.1f",
+        target and target.kind or "nil", localY))
     self:ApplyDrop(dragId, target)
     self:_rebuild()
 end
@@ -655,6 +702,9 @@ end
 -- Destroys the tree Panel (row children die with it).
 function Manager:_destroyTree()
     self:_endRename(false)
+    self.dragId = nil
+    self.dragVisual = nil
+    self._treeIsLayer = false
     self.rowWidgets = {}
     self.rowButtons = {}
     if self.treePanel ~= nil then
@@ -813,15 +863,72 @@ local function mountButton(parent, bucket, x, y, w, h, label, onPress)
     pcall(function() button.stylesheetID = safeButtonStyle() end)
     button.clickthrough = false
     button:SetPos(x, y)
-    button:SetSize(w, h)
+    -- Set label before size so stylesheet preferred-width from text cannot beat the layout budget.
     pcall(function() button.text.content = label end)
-    button:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
-        onPress()
-        return true
-    end)
+    button:SetSize(w, h)
+    if onPress ~= nil then
+        button:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
+            onPress()
+            return true
+        end)
+    end
     pcall(function() button:MoveToFront() end)
     bucket[#bucket + 1] = button
     return button
+end
+
+-- Native row drag (#92). In-client, ComponentDragConfig moves on X only (COMPLETE endX
+-- changes, endY stays 0) — bank-style horizontal drag. We still use it for gesture
+-- begin/end + draggedComponent, and drive the row's Y ourselves in Manager:Update from
+-- Mouse.GetPosition() so reorder/nest track the cursor vertically.
+---@param comp ui.Component
+---@param self Watchdog.Manager
+---@param row Watchdog.ManagerRow
+---@param visual ui.Component|nil  # defaults to `comp`
+---@param note string|nil
+local function wireNativeRowDrag(comp, self, row, visual, note)
+    if comp == nil then return end
+    local captured = row
+    local ghost = visual or comp
+    local okCfg, errCfg = pcall(function()
+        local dc = comp.dragConfig
+        if dc == nil then error("nil dragConfig") end
+        dc.draggedComponent = ghost
+        dc.dragDelayTicks = ROW_DRAG_DELAY_TICKS
+        dc.deadZone = ROW_DRAG_DEAD_ZONE
+        -- INVISIBLE: hide the native X-only ghost; we reposition `ghost` on Y in Update.
+        if ui.DragRenderBehaviour ~= nil then
+            dc.renderBehaviour = ui.DragRenderBehaviour.INVISIBLE
+        end
+    end)
+    local ghostOk = false
+    pcall(function() ghostOk = (comp.dragConfig.draggedComponent == ghost) end)
+    dragProbe(string.format("wire id=%s cfgOk=%s ghostOk=%s err=%s %s",
+        tostring(captured.id), tostring(okCfg), tostring(ghostOk), tostring(errCfg), note or ""))
+
+    pcall(function()
+        comp:Subscribe(ui.Hook.ONDRAG, function()
+            if self.dragId ~= captured.id then
+                dragProbe("ONDRAG id=" .. tostring(captured.id))
+            end
+            self.dragId = captured.id
+            self.dragVisual = ghost
+            self.pendingScopeDrop = nil
+            self.pendingDeleteId = nil
+            return true
+        end)
+        comp:Subscribe(ui.Hook.ONDRAGCOMPLETE, function(...)
+            local n = select("#", ...)
+            local parts = {}
+            for i = 1, n do
+                parts[#parts + 1] = tostring(select(i, ...))
+            end
+            dragProbe(string.format("COMPLETE id=%s n=%d args=[%s]",
+                tostring(captured.id), n, table.concat(parts, "|")))
+            self:_completeDrag(captured.id)
+            return true
+        end)
+    end)
 end
 
 local SUBMIT_CAUSES = {
@@ -996,61 +1103,68 @@ function Manager:_rebuild()
     end
     self:_clearChildren()
     self.lastSignature = self:_signature()
+    -- Don't wipe the probe on rebuild — COMPLETE→rebuild was erasing ONDRAG evidence.
+    dragProbe("rebuild")
 
     local w, h = contentSize(self.contentParent)
     self.window.w, self.window.h = w, h
 
     self:_mountToolbar()
 
-    -- Tree: sibling of Tabs under contentParent, below the tab strip (not inside a tab page).
-    -- Do NOT assign scrollable — read-only on ComponentCollection; writing it aborts the pcall
-    -- and leaves no tree.
+    -- Tree: sibling of Tabs under contentParent, below the tab strip.
+    -- Use ui.Layer (no auto-layout) so native drag can move a row in Y — a vertical ui.Panel
+    -- reflows every tick and pins the dragged row to its slot (looks like X-only movement).
+    -- Do NOT assign scrollable — read-only on ComponentCollection; writing it aborts the pcall.
     local rowW = math.max(40, w - 2 * PAGE_PAD)
     local treeH = math.max(40, h - TREE_TOP - PAGE_PAD)
+    self._treeIsLayer = false
     local treeOk = pcall(function()
-        self.treePanel = ui.Panel.new(self.contentParent)
-        self.treePanel.isVertical = true
-        self.treePanel.spacing = 0
-        self.treePanel.clickthrough = false
-        self.treePanel:SetPos(PAGE_PAD, TREE_TOP)
-        self.treePanel:SetSize(rowW, treeH)
-        self.treePanel:MoveToFront()
+        local tree
+        if ui.Layer ~= nil then
+            tree = ui.Layer.new(self.contentParent)
+            self._treeIsLayer = true
+        else
+            tree = ui.Panel.new(self.contentParent)
+            tree.isVertical = true
+            tree.spacing = 0
+        end
+        tree.clickthrough = false
+        tree:SetPos(PAGE_PAD, TREE_TOP)
+        tree:SetSize(rowW, treeH)
+        tree:MoveToFront()
+        self.treePanel = tree
     end)
     if not treeOk or self.treePanel == nil then
         self.treePanel = nil
+        self._treeIsLayer = false
         return
     end
 
     local rows = self:VisibleRows()
     local treeParent = self.treePanel
     -- Native ui.Button ren/del — PrettyUI SpriteButton crashes client teardown after PluginShutdown.
-    local nameW = math.max(40, rowW - ENABLE_W - 2 * ACT_W - 3 * ROW_GAP)
-    for _, row in ipairs(rows) do
+    for i, row in ipairs(rows) do
         local capturedRow = row
+        local delLabel = (self.pendingDeleteId == row.id) and self:_deleteConfirmLabel(row.id) or "Delete"
+        local delW = math.max(ACT_W, 8 + 7 * #delLabel)
+        local rowY = (i - 1) * ROW_H
+        -- Each row is a Layer (absolute children), not a horizontal Panel. Dragging a
+        -- horizontal Panel (isVertical=false) axis-locks the ghost to X even on a Layer tree.
+        local nameW = math.max(40, rowW - HANDLE_W - ENABLE_W - ACT_W - delW - 4 * ROW_GAP - ROW_SLACK)
         local rowPanel = treeParent
         local okRow = pcall(function()
-            rowPanel = ui.Panel.new(treeParent)
-            rowPanel.isVertical = false
-            rowPanel.spacing = ROW_GAP
+            if self._treeIsLayer and ui.Layer ~= nil then
+                rowPanel = ui.Layer.new(treeParent)
+            else
+                rowPanel = ui.Panel.new(treeParent)
+                rowPanel.isVertical = false
+                rowPanel.spacing = ROW_GAP
+            end
             rowPanel.clickthrough = false
+            if self._treeIsLayer then
+                rowPanel:SetPos(0, rowY)
+            end
             rowPanel:SetSize(rowW, ROW_H)
-            -- Native drag gesture (#92): delay/dead-zone so short clicks still hit children.
-            rowPanel.dragConfig = {
-                dragDelayTicks = 3,
-                deadZone = 6,
-                renderBehaviour = (ui.DragRenderBehaviour and ui.DragRenderBehaviour.TRANSPARENT_OVERLAY)
-                    or "TRANSPARENT_OVERLAY",
-            }
-            rowPanel:Subscribe(ui.Hook.ONDRAG, function()
-                self.dragId = capturedRow.id
-                self.pendingScopeDrop = nil
-                self.pendingDeleteId = nil
-                return true
-            end)
-            rowPanel:Subscribe(ui.Hook.ONDRAGCOMPLETE, function()
-                self:_completeDrag(capturedRow.id)
-                return true
-            end)
         end)
         if not okRow or rowPanel == nil then
             rowPanel = treeParent
@@ -1059,7 +1173,14 @@ function Manager:_rebuild()
             self.rowButtons[#self.rowButtons + 1] = rowPanel
         end
 
-        local nameX = ENABLE_W + ROW_GAP
+        local x = 0
+        do
+            local bucket = (rowPanel == treeParent) and self.rowButtons or {}
+            local handle = mountButton(rowPanel, bucket, x, 0, HANDLE_W, ROW_H, "::", nil)
+            local visual = (rowPanel ~= treeParent) and rowPanel or handle
+            wireNativeRowDrag(handle, self, capturedRow, visual, "grip=inRowLayer")
+        end
+        x = x + HANDLE_W + ROW_GAP
 
         local enableMounted = false
         if ui.Check ~= nil then
@@ -1068,7 +1189,7 @@ function Manager:_rebuild()
             if okc and check ~= nil then
                 pcall(function()
                     check.stylesheetID = safeCheckStyle()
-                    check:SetPos(0, 0)
+                    check:SetPos(x, 0)
                     check:SetSize(ENABLE_W, ROW_H)
                     check.buttonSize = math.min(ENABLE_W - 2, ROW_H - 2)
                     check.value = row.enabled and true or false
@@ -1089,13 +1210,15 @@ function Manager:_rebuild()
         if not enableMounted then
             local mark = row.enabled and "[x]" or "[ ]"
             local bucket = (rowPanel == treeParent) and self.rowButtons or {}
-            mountButton(rowPanel, bucket, 0, 0, ENABLE_W, ROW_H, mark, function()
+            mountButton(rowPanel, bucket, x, 0, ENABLE_W, ROW_H, mark, function()
                 self.pendingDeleteId = nil
                 self:ToggleEnabled(capturedRow.id)
                 self:_rebuild()
             end)
         end
+        x = x + ENABLE_W + ROW_GAP
 
+        local nameX = x
         do
             local bucket = (rowPanel == treeParent) and self.rowButtons or {}
             mountButton(rowPanel, bucket, nameX, 0, nameW, ROW_H, self:RowLabel(row), function()
@@ -1104,25 +1227,22 @@ function Manager:_rebuild()
                 if capturedRow.kind == "group" then self:_rebuild() end
             end)
         end
+        x = nameX + nameW + ROW_GAP
 
-        local renameX = nameX + nameW + ROW_GAP
         do
             local bucket = (rowPanel == treeParent) and self.rowButtons or {}
-            mountButton(rowPanel, bucket, renameX, 0, ACT_W, ROW_H, "Rename", function()
+            mountButton(rowPanel, bucket, x, 0, ACT_W, ROW_H, "Rename", function()
                 self.pendingDeleteId = nil
                 local fieldY = 0
                 pcall(function() fieldY = rowPanel.y or 0 end)
                 self:_beginRename(capturedRow.id, capturedRow.name, nameX, fieldY, nameW, ROW_H)
             end)
         end
+        x = x + ACT_W + ROW_GAP
 
-        local deleteX = renameX + ACT_W + ROW_GAP
-        local armed = self.pendingDeleteId == row.id
-        local delLabel = armed and self:_deleteConfirmLabel(row.id) or "Delete"
-        local delW = math.max(ACT_W, 8 + 7 * #delLabel)
         do
             local bucket = (rowPanel == treeParent) and self.rowButtons or {}
-            mountButton(rowPanel, bucket, deleteX, 0, delW, ROW_H, delLabel, function()
+            mountButton(rowPanel, bucket, x, 0, delW, ROW_H, delLabel, function()
                 self:_onDeletePress(capturedRow.id)
             end)
         end
@@ -1171,6 +1291,19 @@ end
 function Manager:Update()
     self.tick = self.tick + 1
     if not self.visible or self.tabs == nil then return end
+    -- Native drag is X-locked (bank-style). While a gesture is live, pin the row's Y to the
+    -- cursor so reorder/nest tracking is vertical.
+    if self.dragId ~= nil and self.dragVisual ~= nil and self.treePanel ~= nil then
+        local _, my = mouseScreenPos()
+        local _, treeTop = componentScreenPos(self.treePanel)
+        if my ~= nil and treeTop ~= nil then
+            local localY = my - treeTop - (ROW_H * 0.5)
+            pcall(function()
+                self.dragVisual:SetPos(0, localY)
+                self.dragVisual:MoveToFront()
+            end)
+        end
+    end
     if self:_signature() ~= self.lastSignature then
         self:_rebuild()
     end
@@ -1213,6 +1346,7 @@ end
 -- _destroyToolbar / _destroyTabs while the window stays alive.
 function Manager:Unmount()
     self.pendingDeleteId = nil
+    self.dragId = nil
     self:_endRename(false)
     self.toolbarButtons = {}
     self.rowWidgets = {}
