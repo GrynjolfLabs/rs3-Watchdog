@@ -470,6 +470,23 @@ function Runtime:RenameAlert(id, name)
     return false
 end
 
+-- Retargets a live alert's Bucket key without Remove/Add (#92 cross-scope move). Preserves the
+-- alert object (and its poll-edge state) so no `Enter` edge is replayed — both Buckets are armed
+-- by construction while the Manager can offer a cross-scope drop. Returns true if an alert with
+-- that id existed.
+---@param id integer
+---@param bucketKey string
+---@return boolean
+function Runtime:SetAlertBucketKey(id, bucketKey)
+    for _, alert in ipairs(self.alerts) do
+        if alert.id == id then
+            alert.bucketKey = bucketKey or GLOBAL_BUCKET
+            return true
+        end
+    end
+    return false
+end
+
 -- Injects the node-type registry (#33) so PreloadNode/PreloadGraph can look up a node's
 -- descriptor by typeKey. Kept as its own seam (like SetPersistence) rather than a Runtime.new
 -- param, since main.lua constructs the registry after the runtime.
