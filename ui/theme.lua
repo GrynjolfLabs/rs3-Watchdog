@@ -180,6 +180,12 @@ Theme.PALETTE_SCROLLBAR_MIN_THUMB = 24  -- floor on the proportional thumb so it
 Theme.DOUBLECLICK_TICKS = 12  -- Logic ticks (~0.02s each) allowed between the two clicks
 Theme.DOUBLECLICK_DIST  = 6   -- max screen-px drift between the two clicks
 
+-- Alert Manager drag drop-target bands (#92): fraction of a row's height. The middle band of a
+-- *group* row nests into that group; outside it (and every alert row) is sibling reorder.
+Theme.MANAGER_NEST_BAND_LO = 0.25
+Theme.MANAGER_NEST_BAND_HI = 0.75
+Theme.MANAGER_ROW_H        = 22    -- tree row height (matches ui/manager.lua ROW_H)
+
 --- Colors --------------------------------------------------------------------------
 
 Theme.COL_VIEWPORT_BG = col(26, 26, 30, 1.0)

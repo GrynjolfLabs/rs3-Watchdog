@@ -664,6 +664,17 @@ function TestRuntime:testRenameAlertRetargetsNameIndex()
     luaunit.assertEquals(self.runtime.alerts[1].name, "new")
 end
 
+function TestRuntime:testSetAlertBucketKeyPreservesAlertObject()
+    -- Cross-scope move (#92) retargets bucketKey in place so poll-edge state isn't cleared
+    -- (no Remove/Add → no Enter replay).
+    local graphA = Graph.new(self.registry)
+    self.runtime:SetGraph(nil)
+    local alert = self.runtime:AddAlert(1, "mover", graphA, true, "global")
+    luaunit.assertTrue(self.runtime:SetAlertBucketKey(1, "player_alice"))
+    luaunit.assertEquals(self.runtime.alerts[1].bucketKey, "player_alice")
+    luaunit.assertEquals(self.runtime.alerts[1], alert) -- same table object
+end
+
 function TestRuntime:testStopUnsubscribesAllChannels()
     registerEchoTrigger(self.registry, "fixture.echo")
     self.runtime:BindTrigger("fixture.echo", { { event = "Custom" } })

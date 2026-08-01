@@ -212,26 +212,48 @@ function Store.FindById(doc, id)
     return found, foundSiblings, foundIndex
 end
 
+-- Inserts `entry` into `parentId`'s children (a group), or the root when `parentId` is nil.
+-- When `index` is nil, appends; otherwise clamps `index` into `[1, #siblings+1]` and inserts
+-- there (1-based, Lua array style). Returns true on success; false if `parentId` names an entry
+-- that doesn't exist or isn't a group. Mutates `doc` in place.
+---@param doc Watchdog.Bucket
+---@param entry Watchdog.Entry
+---@param parentId integer|nil                     # nil ⇒ root; else a group entry's id
+---@param index integer|nil                        # 1-based insert position; nil ⇒ append
+---@return boolean
+function Store.InsertEntryAt(doc, entry, parentId, index)
+    doc.entries = doc.entries or {}
+    local siblings
+    if parentId == nil then
+        siblings = doc.entries
+    else
+        local parent = Store.FindById(doc, parentId)
+        if parent == nil or parent.kind ~= "group" then
+            return false
+        end
+        parent.children = parent.children or {}
+        siblings = parent.children
+    end
+    if index == nil then
+        siblings[#siblings + 1] = entry
+    else
+        local i = math.floor(index)
+        if i < 1 then i = 1 end
+        if i > #siblings + 1 then i = #siblings + 1 end
+        table.insert(siblings, i, entry)
+    end
+    return true
+end
+
 -- Appends `entry` to the end of `parentId`'s children (a group), or to the root when `parentId`
 -- is nil. Returns true on success; false if `parentId` names an entry that doesn't exist or isn't
--- a group. Mutates `doc` in place.
+-- a group. Mutates `doc` in place. Equivalent to InsertEntryAt with a nil index.
 ---@param doc Watchdog.Bucket
 ---@param entry Watchdog.Entry
 ---@param parentId integer|nil                     # nil ⇒ root; else a group entry's id
 ---@return boolean
 function Store.InsertEntry(doc, entry, parentId)
-    doc.entries = doc.entries or {}
-    if parentId == nil then
-        doc.entries[#doc.entries + 1] = entry
-        return true
-    end
-    local parent = Store.FindById(doc, parentId)
-    if parent == nil or parent.kind ~= "group" then
-        return false
-    end
-    parent.children = parent.children or {}
-    parent.children[#parent.children + 1] = entry
-    return true
+    return Store.InsertEntryAt(doc, entry, parentId, nil)
 end
 
 -- Removes the entry with `id` from wherever it sits in the tree (its whole subtree goes with it).
@@ -260,28 +282,61 @@ local function subtreeContains(entry, targetId)
     return false
 end
 
--- Reparents the entry with `id` (and its whole subtree) to the end of `newParentId`'s children,
--- or to the root when `newParentId` is nil. Id-keyed like every tree op; the moved subtree stays
--- intact. Returns true on success, false and leaves the tree untouched when: no entry has `id`;
--- `newParentId` names an entry that doesn't exist or isn't a group; or `newParentId` is `id` itself
--- or one of its descendants (a cycle — see subtreeContains). Mutates `doc` in place.
+-- Reparents the entry with `id` (and its whole subtree) under `newParentId` (nil ⇒ root).
+-- Optional `atIndex` is the 1-based sibling slot at the destination (nil ⇒ append). Id-keyed
+-- like every tree op; the moved subtree stays intact. Returns true on success, false and leaves
+-- the tree untouched when: no entry has `id`; `newParentId` names an entry that doesn't exist or
+-- isn't a group; or `newParentId` is `id` itself or one of its descendants (a cycle — see
+-- subtreeContains). Mutates `doc` in place.
 ---@param doc Watchdog.Bucket
 ---@param id integer
 ---@param newParentId integer|nil                  # nil ⇒ root; else a group entry's id
+---@param atIndex integer|nil                      # 1-based insert position; nil ⇒ append
 ---@return boolean
-function Store.MoveSubtree(doc, id, newParentId)
+function Store.MoveSubtree(doc, id, newParentId, atIndex)
     local entry, siblings, index = Store.FindById(doc, id)
     if entry == nil then return false end
     -- Validate the destination *before* detaching, so a refused move is a genuine no-op: reject a
     -- cycle (into self or a descendant), or a parent that doesn't exist / isn't a group. The
-    -- group/existence half mirrors InsertEntry's, which does the actual append below.
+    -- group/existence half mirrors InsertEntryAt's, which does the actual insert below.
     if newParentId ~= nil then
         if subtreeContains(entry, newParentId) then return false end
         local parent = Store.FindById(doc, newParentId)
         if parent == nil or parent.kind ~= "group" then return false end
     end
+    -- When reordering within the same sibling list, removing the entry shifts indices after it —
+    -- bump the destination down so the caller's "before this sibling" intent still holds.
+    local destIndex = atIndex
+    if destIndex ~= nil and siblings ~= nil then
+        local sameList = false
+        if newParentId == nil then
+            sameList = (siblings == (doc.entries or {}))
+        else
+            local parent = Store.FindById(doc, newParentId)
+            sameList = parent ~= nil and parent.children == siblings
+        end
+        if sameList and index < destIndex then
+            destIndex = destIndex - 1
+        end
+    end
     table.remove(siblings, index)
-    return Store.InsertEntry(doc, entry, newParentId)
+    return Store.InsertEntryAt(doc, entry, newParentId, destIndex)
+end
+
+-- Moves the entry with `id` (and its whole subtree) from `srcDoc` to the root of `dstDoc`,
+-- preserving the entry's id and structure — not a JSON round-trip. Appends at destination root.
+-- Returns the moved entry, or nil (and leaves both docs untouched) when: no entry has `id` in
+-- `srcDoc`; or `dstDoc` already has an entry with that id (collision). Mutates both docs in place.
+---@param srcDoc Watchdog.Bucket
+---@param dstDoc Watchdog.Bucket
+---@param id integer
+---@return Watchdog.Entry|nil
+function Store.MoveEntryBetweenBuckets(srcDoc, dstDoc, id)
+    if Store.FindById(dstDoc, id) ~= nil then return nil end
+    local entry = Store.DeleteById(srcDoc, id)
+    if entry == nil then return nil end
+    Store.InsertEntry(dstDoc, entry, nil)
+    return entry
 end
 
 --- Enabled-chain (#88) --------------------------------------------------------------------

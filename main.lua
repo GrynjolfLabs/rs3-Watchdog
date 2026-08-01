@@ -414,6 +414,19 @@ local function collectAlertIds(entry, out)
     end
 end
 
+-- True if `entry`'s subtree contains `targetId` (inclusive). Shared by delete / cross-scope move
+-- when deciding whether the Editor's bound entry rides along.
+---@param entry Watchdog.Entry
+---@param targetId integer
+---@return boolean
+local function entryContains(entry, targetId)
+    if entry.id == targetId then return true end
+    for _, c in ipairs(entry.children or {}) do
+        if entryContains(c, targetId) then return true end
+    end
+    return false
+end
+
 -- Drop every matching id from a restored-alerts list (keeps resolveAlert from resurrecting a
 -- just-deleted Entry).
 ---@param list Watchdog.RestoredAlert[]
@@ -485,14 +498,7 @@ local function onDelete(scopeKey, id)
     -- Unbind the Editor if its bound entry is in the deleted subtree (AC: deleting the bound
     -- entry unbinds). Check while the entry still exists, then navigate up.
     if editor.boundId ~= nil and boundScope ~= nil and boundScope.key == key then
-        local function contains(e, target)
-            if e.id == target then return true end
-            for _, c in ipairs(e.children or {}) do
-                if contains(c, target) then return true end
-            end
-            return false
-        end
-        if contains(entry, editor.boundId) then
+        if entryContains(entry, editor.boundId) then
             navBack()
         end
     end
@@ -535,6 +541,85 @@ local function onCreateGroup(scopeKey)
     return id
 end
 
+-- Manager drag (#92): sibling reorder within a Bucket. Enabled-chain re-resolves live over the
+-- tree; armed-ness is unchanged (same Bucket).
+---@param scopeKey string
+---@param id integer
+---@param parentId integer|nil
+---@param index integer
+local function onReorder(scopeKey, id, parentId, index)
+    local doc, key = scopeBucket(scopeKey)
+    if doc == nil then return end
+    if not Store.MoveSubtree(doc, id, parentId, index) then return end
+    Store.SaveTo(key, doc)
+end
+
+-- Manager drag (#92): nest into a group's children (append). Same-Bucket — no Enter replay.
+---@param scopeKey string
+---@param id integer
+---@param parentId integer
+local function onNest(scopeKey, id, parentId)
+    local doc, key = scopeBucket(scopeKey)
+    if doc == nil then return end
+    if not Store.MoveSubtree(doc, id, parentId) then return end
+    Store.SaveTo(key, doc)
+end
+
+-- Pull matching RestoredAlert records out of `fromList` (preserving order) for transfer into
+-- another scope's parallel list after a cross-bucket move.
+---@param fromList Watchdog.RestoredAlert[]|nil
+---@param ids integer[]
+---@return Watchdog.RestoredAlert[]
+local function takeAlertListEntries(fromList, ids)
+    local want = {}
+    for _, id in ipairs(ids) do want[id] = true end
+    local taken = {}
+    if fromList == nil then return taken end
+    for i = #fromList, 1, -1 do
+        local a = fromList[i]
+        if want[a.id] then
+            table.insert(taken, 1, a)
+            table.remove(fromList, i)
+        end
+    end
+    return taken
+end
+
+-- Manager drag (#92): key-to-key Bucket move. Preserves Entry ids, appends at destination root.
+-- Updates live alert `bucketKey` in place (no Remove/Add → no Enter replay). Unavailable when
+-- logged out (Manager only exposes one tab, so ApplyDrop never offers scope).
+---@param fromKey string
+---@param toKey string
+---@param id integer
+local function onMoveScope(fromKey, toKey, id)
+    local srcDoc, srcKey, srcList = scopeBucket(fromKey)
+    local dstDoc, dstKey, dstList = scopeBucket(toKey)
+    if srcDoc == nil or dstDoc == nil or srcKey == nil or dstKey == nil then return end
+    local entry = Store.FindById(srcDoc, id)
+    if entry == nil then return end
+    local alertIds = {}
+    collectAlertIds(entry, alertIds)
+    if Store.MoveEntryBetweenBuckets(srcDoc, dstDoc, id) == nil then return end
+    Store.SaveTo(srcKey, srcDoc)
+    Store.SaveTo(dstKey, dstDoc)
+    for _, aid in ipairs(alertIds) do
+        runtime:SetAlertBucketKey(aid, dstKey)
+    end
+    local moved = takeAlertListEntries(srcList, alertIds)
+    if dstList ~= nil then
+        for _, a in ipairs(moved) do
+            dstList[#dstList + 1] = a
+        end
+    end
+    -- Keep the Editor's bound scope pointer honest if the open entry moved with the subtree.
+    if boundScope ~= nil and boundScope.key == srcKey and editor.boundId ~= nil then
+        if entryContains(entry, editor.boundId) then
+            boundScope = { doc = dstDoc, key = dstKey }
+            boundLastEncoded = Store.Encode(dstDoc)
+        end
+    end
+end
+
 manager = Manager.new({
     scopes = getScopes,
     onOpenAlert = navOpenAlert,
@@ -543,6 +628,9 @@ manager = Manager.new({
     onDelete = onDelete,
     onCreateAlert = onCreateAlert,
     onCreateGroup = onCreateGroup,
+    onReorder = onReorder,
+    onNest = onNest,
+    onMoveScope = onMoveScope,
 })
 
 -- Shared prettyui.Window host: Manager/Editor mount into Content()/Overlay(); Push/Pop swaps

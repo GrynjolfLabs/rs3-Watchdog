@@ -761,4 +761,110 @@ function TestStore:testDistinctCharactersUseDistinctBuckets()
     luaunit.assertEquals(Store.LoadKey(bKey).entries[1].name, "b-only")
 end
 
+--- Insert-at-index + cross-bucket move (#92) ----------------------------------------------
+
+function TestStore:testInsertEntryAtPlacesAtRootIndex()
+    local doc = Store.Empty()
+    local a = seedAlert(self, doc, "a", true)
+    local b = seedAlert(self, doc, "b", true)
+    local cId = Store.MintId(doc)
+    local c = Store.NewAlertEntry(cId, "c", LibNodeGraph.NewGraph(self.registry), {}, true)
+    luaunit.assertTrue(Store.InsertEntryAt(doc, c, nil, 2))
+    luaunit.assertEquals(doc.entries[1].id, a)
+    luaunit.assertEquals(doc.entries[2].id, cId)
+    luaunit.assertEquals(doc.entries[3].id, b)
+end
+
+function TestStore:testInsertEntryAtPlacesInsideGroup()
+    local doc = Store.Empty()
+    local groupId = Store.MintId(doc)
+    Store.InsertEntry(doc, Store.NewGroupEntry(groupId, "g", true, {}))
+    local a = seedAlert(self, doc, "a", true, groupId)
+    local b = seedAlert(self, doc, "b", true, groupId)
+    local cId = Store.MintId(doc)
+    local c = Store.NewAlertEntry(cId, "c", LibNodeGraph.NewGraph(self.registry), {}, true)
+    luaunit.assertTrue(Store.InsertEntryAt(doc, c, groupId, 1))
+    local kids = Store.FindById(doc, groupId).children
+    luaunit.assertEquals(kids[1].id, cId)
+    luaunit.assertEquals(kids[2].id, a)
+    luaunit.assertEquals(kids[3].id, b)
+end
+
+function TestStore:testInsertEntryAtRefusesNonGroupParent()
+    local doc = Store.Empty()
+    local alertId = seedAlert(self, doc, "a", true)
+    local cId = Store.MintId(doc)
+    local c = Store.NewAlertEntry(cId, "c", LibNodeGraph.NewGraph(self.registry), {}, true)
+    luaunit.assertFalse(Store.InsertEntryAt(doc, c, alertId, 1))
+    luaunit.assertEquals(#doc.entries, 1)
+end
+
+function TestStore:testMoveSubtreeToIndexReordersAmongSiblings()
+    local doc = Store.Empty()
+    local a = seedAlert(self, doc, "a", true)
+    local b = seedAlert(self, doc, "b", true)
+    local c = seedAlert(self, doc, "c", true)
+    luaunit.assertTrue(Store.MoveSubtree(doc, c, nil, 1))
+    luaunit.assertEquals(doc.entries[1].id, c)
+    luaunit.assertEquals(doc.entries[2].id, a)
+    luaunit.assertEquals(doc.entries[3].id, b)
+end
+
+function TestStore:testMoveSubtreeNilIndexStillAppends()
+    local doc = Store.Empty()
+    local groupId = Store.MintId(doc)
+    Store.InsertEntry(doc, Store.NewGroupEntry(groupId, "g", true, {}))
+    local a = seedAlert(self, doc, "a", true)
+    seedAlert(self, doc, "inside", true, groupId)
+    luaunit.assertTrue(Store.MoveSubtree(doc, a, groupId))
+    local kids = Store.FindById(doc, groupId).children
+    luaunit.assertEquals(kids[#kids].id, a)
+end
+
+function TestStore:testMoveEntryBetweenBucketsPreservesIdAndAppendsRoot()
+    local src = Store.Empty()
+    local dst = Store.Empty()
+    -- Distinct ids across buckets (each Empty() would otherwise both mint 1).
+    local alertId = 10
+    Store.InsertEntry(src, Store.NewAlertEntry(alertId, "mover", LibNodeGraph.NewGraph(self.registry), {}, true))
+    Store.InsertEntry(dst, Store.NewAlertEntry(1, "already", LibNodeGraph.NewGraph(self.registry), {}, true))
+    local moved = Store.MoveEntryBetweenBuckets(src, dst, alertId)
+    luaunit.assertNotNil(moved)
+    luaunit.assertEquals(moved.id, alertId)
+    luaunit.assertEquals(moved.name, "mover")
+    luaunit.assertEquals(#src.entries, 0)
+    luaunit.assertEquals(#dst.entries, 2)
+    luaunit.assertEquals(dst.entries[2].id, alertId)
+end
+
+function TestStore:testMoveEntryBetweenBucketsCarriesGroupSubtree()
+    local src = Store.Empty()
+    local dst = Store.Empty()
+    local groupId = Store.MintId(src)
+    Store.InsertEntry(src, Store.NewGroupEntry(groupId, "g", true, {}))
+    local childId = seedAlert(self, src, "nested", true, groupId)
+    luaunit.assertNotNil(Store.MoveEntryBetweenBuckets(src, dst, groupId))
+    luaunit.assertEquals(#src.entries, 0)
+    luaunit.assertEquals(dst.entries[1].id, groupId)
+    luaunit.assertEquals(dst.entries[1].children[1].id, childId)
+end
+
+function TestStore:testMoveEntryBetweenBucketsRefusesIdCollision()
+    local src = Store.Empty()
+    local dst = Store.Empty()
+    -- Force the same id into both buckets.
+    local id = 7
+    Store.InsertEntry(src, Store.NewAlertEntry(id, "src", LibNodeGraph.NewGraph(self.registry), {}, true))
+    Store.InsertEntry(dst, Store.NewAlertEntry(id, "dst", LibNodeGraph.NewGraph(self.registry), {}, true))
+    luaunit.assertNil(Store.MoveEntryBetweenBuckets(src, dst, id))
+    luaunit.assertEquals(#src.entries, 1)
+    luaunit.assertEquals(dst.entries[1].name, "dst")
+end
+
+function TestStore:testMoveEntryBetweenBucketsReturnsNilForUnknownId()
+    local src = Store.Empty()
+    local dst = Store.Empty()
+    luaunit.assertNil(Store.MoveEntryBetweenBuckets(src, dst, 999))
+end
+
 return TestStore

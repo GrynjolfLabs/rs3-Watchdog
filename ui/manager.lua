@@ -15,8 +15,8 @@
 -- Destroying Tabs then the window double-frees after Show).
 --
 -- #90 landed the tree/scope/expand read-only cut; #91 adds the per-row editing ops; PrettyUI
--- chrome migration replaces hand-laid tab buttons and ASCII ren/del. Drag-reorder and
--- multi-select are later tickets (#92, #93).
+-- chrome migration replaces hand-laid tab buttons and ASCII ren/del. #92 adds native row-panel
+-- drag (reorder / nest / cross-scope). Multi-select is #93.
 --
 -- ## Two halves
 --
@@ -27,6 +27,7 @@
 -- pcall-guarded, the same split every other surface in this plugin uses.
 
 local Theme = require("ui/theme")
+local Store = require("store")
 
 local Manager = {}
 Manager.__index = Manager
@@ -64,12 +65,37 @@ local TREE_TOP    = TAB_BASELINE + 4 -- tree sits below the PrettyUI tab strip
 ---@field childCount integer|nil      # group only: number of DIRECT children
 ---@field expanded boolean            # group only: whether its children are shown (false for alerts)
 ---@field enabled boolean             # the Entry's own enabled flag (drives the row enable Check)
+---@field parentId integer|nil        # parent group id, or nil at root (#92 drop target)
+---@field index integer               # 1-based sibling index under parent/root (#92 reorder)
+
+-- Geometry-enriched row for ResolveDropTarget (#92). Built from VisibleRows + layout Y.
+---@class Watchdog.DropRow
+---@field id integer
+---@field kind "alert"|"group"
+---@field parentId integer|nil
+---@field index integer
+---@field y number
+---@field h number|nil
+
+---A resolved drop landing for Manager drag (#92). `reorder` inserts among siblings;
+---`nest` appends into a group's children; `scope` moves the subtree to another Bucket root.
+---@class Watchdog.DropTarget
+---@field kind "reorder"|"nest"|"scope"
+---@field parentId integer|nil        # reorder/nest: destination parent (nil ⇒ root)
+---@field index integer|nil           # reorder: 1-based sibling insert index
+---@field scopeKey string|nil         # scope: destination Bucket key
+
+---@class Watchdog.ResolveDropOpts
+---@field dragId integer|nil
+---@field dragSubtreeIds table<integer, boolean>|nil  # drag id + descendants (cycle guard)
+---@field scopeKey string|nil         # inactive-tab hit → immediate scope drop
 
 --- Construction ---------------------------------------------------------------------------
 
--- The Manager's whole seam onto its host: the scope provider, the alert-open callback, and the
--- #91 mutation callbacks (enable / rename / delete / create). Persistence + runtime sync live in
--- the host (main.lua); the Manager only reports the op and bumps its rebuild signature.
+-- The Manager's whole seam onto its host: the scope provider, the alert-open callback, the
+-- #91 mutation callbacks (enable / rename / delete / create), and the #92 drag callbacks
+-- (reorder / nest / cross-scope). Persistence + runtime sync live in the host (main.lua);
+-- the Manager only reports the op and bumps its rebuild signature.
 ---@class Watchdog.ManagerOpts
 ---@field scopes fun(): Watchdog.ManagerScope[]              # ordered scopes (Global first, character second)
 ---@field onOpenAlert fun(scopeKey: string, id: integer)    # nav callback for a double-clicked alert row
@@ -78,14 +104,17 @@ local TREE_TOP    = TAB_BASELINE + 4 -- tree sits below the PrettyUI tab strip
 ---@field onDelete fun(scopeKey: string, id: integer)|nil
 ---@field onCreateAlert fun(scopeKey: string): integer|nil   # returns the minted alert id
 ---@field onCreateGroup fun(scopeKey: string): integer|nil   # returns the minted group id
+---@field onReorder fun(scopeKey: string, id: integer, parentId: integer|nil, index: integer)|nil
+---@field onNest fun(scopeKey: string, id: integer, parentId: integer)|nil
+---@field onMoveScope fun(fromKey: string, toKey: string, id: integer)|nil
 
 -- `scopes` is the injected scope provider: `fn() -> Watchdog.ManagerScope[]`, ordered (Global
 -- first, the current character second when logged in). Called live on every rebuild so a character
 -- login/logout re-tabs without the Manager caching identity. `onOpenAlert` is the nav callback
 -- `fn(scopeKey, id)` fired when an alert row is double-clicked — main.lua's nav owner binds the
--- Editor to that entry. The #91 mutation callbacks (`onToggleEnabled` / `onRename` / `onDelete` /
--- `onCreateAlert` / `onCreateGroup`) are the host's Store+Runtime wiring; absent ⇒ the matching
--- Manager method is a silent no-op. All of these are the whole seam onto the host.
+-- Editor to that entry. Mutation callbacks (`onToggleEnabled` / `onRename` / `onDelete` /
+-- `onCreateAlert` / `onCreateGroup` / `onReorder` / `onNest` / `onMoveScope`) are the host's
+-- Store+Runtime wiring; absent ⇒ the matching Manager method is a silent no-op.
 ---@param opts Watchdog.ManagerOpts|nil
 ---@return table
 function Manager.new(opts)
@@ -97,10 +126,15 @@ function Manager.new(opts)
         onDelete = opts and opts.onDelete,
         onCreateAlert = opts and opts.onCreateAlert,
         onCreateGroup = opts and opts.onCreateGroup,
+        onReorder = opts and opts.onReorder,
+        onNest = opts and opts.onNest,
+        onMoveScope = opts and opts.onMoveScope,
         activeScope = nil,          -- resolved lazily; nil ⇒ "first scope" (Global)
         expanded = {},              -- expanded[scopeKey][id] = bool; absent ⇒ default (expanded)
         expandVersion = 0,          -- bumped on every toggle, part of the rebuild signature
         mutateVersion = 0,          -- bumped on every row/create mutation (#91) so enable/rename redraw
+        dragId = nil,               -- Entry id being dragged (#92), or nil when idle
+        pendingScopeDrop = nil,     -- inactive-tab scope key hovered during drag (#92)
         visible = false,
         tick = 0,                   -- Logic-tick counter, for row double-click timing
         lastRowId = nil,            -- id of the previously-pressed row (double-click pairing)
@@ -202,14 +236,16 @@ end
 
 -- Walks a scope's Entry tree depth-first pre-order into the flat visible-row list, honoring
 -- collapse: a collapsed group contributes its own row but none of its subtree. Shared by the
--- renderer and the tests; the one place tree shape becomes screen order.
+-- renderer and the tests; the one place tree shape becomes screen order. `parentId`/`index` are
+-- the sibling coordinates #92's drop resolver needs for reorder.
 ---@param self table
 ---@param entries Watchdog.Entry[]|nil
 ---@param scopeKey string
 ---@param depth integer
+---@param parentId integer|nil
 ---@param out Watchdog.ManagerRow[]
-local function flatten(self, entries, scopeKey, depth, out)
-    for _, e in ipairs(entries or {}) do
+local function flatten(self, entries, scopeKey, depth, parentId, out)
+    for i, e in ipairs(entries or {}) do
         local isGroup = e.kind == "group"
         local expanded = isGroup and self:IsExpanded(scopeKey, e.id) or false
         out[#out + 1] = {
@@ -220,9 +256,11 @@ local function flatten(self, entries, scopeKey, depth, out)
             childCount = isGroup and #(e.children or {}) or nil,
             expanded = expanded,
             enabled = e.enabled ~= false,
+            parentId = parentId,
+            index = i,
         }
         if isGroup and expanded then
-            flatten(self, e.children, scopeKey, depth + 1, out)
+            flatten(self, e.children, scopeKey, depth + 1, e.id, out)
         end
     end
     return out
@@ -234,7 +272,194 @@ end
 function Manager:VisibleRows()
     local scope = self:ActiveScope()
     if scope == nil then return {} end
-    return flatten(self, (scope.doc or {}).entries, scope.key, 0, {})
+    return flatten(self, (scope.doc or {}).entries, scope.key, 0, nil, {})
+end
+
+-- Pure drop-target hit-test (#92). Nearest row by vertical center; group middle band nests;
+-- otherwise reorder before/after that sibling. `opts.scopeKey` (inactive tab) short-circuits to
+-- a cross-scope move. Returns nil when there are no candidate rows.
+---@param mouseY number
+---@param rows Watchdog.DropRow[]
+---@param opts Watchdog.ResolveDropOpts|nil
+---@return Watchdog.DropTarget|nil
+function Manager.ResolveDropTarget(mouseY, rows, opts)
+    opts = opts or {}
+    if opts.scopeKey ~= nil then
+        return { kind = "scope", scopeKey = opts.scopeKey }
+    end
+    local dragId = opts.dragId
+    local forbidden = opts.dragSubtreeIds or {}
+    local best, bestDist = nil, math.huge
+    for _, row in ipairs(rows or {}) do
+        if dragId == nil or row.id ~= dragId then
+            local h = row.h or Theme.MANAGER_ROW_H
+            local y = row.y or 0
+            local cy = y + h * 0.5
+            local d = math.abs(mouseY - cy)
+            if d < bestDist then
+                bestDist = d
+                best = row
+            end
+        end
+    end
+    if best == nil then return nil end
+    local h = best.h or Theme.MANAGER_ROW_H
+    local rel = (mouseY - (best.y or 0)) / h
+    local lo = Theme.MANAGER_NEST_BAND_LO
+    local hi = Theme.MANAGER_NEST_BAND_HI
+    if best.kind == "group" and rel > lo and rel < hi and not forbidden[best.id] then
+        return { kind = "nest", parentId = best.id }
+    end
+    local after = rel >= 0.5
+    local index = after and ((best.index or 1) + 1) or (best.index or 1)
+    return { kind = "reorder", parentId = best.parentId, index = index }
+end
+
+-- Collects `id` plus every descendant id into a set — the cycle guard ResolveDropTarget uses
+-- so a group can't be nested under one of its own children.
+---@param entry Watchdog.Entry|nil
+---@param out table<integer, boolean>|nil
+---@return table<integer, boolean>
+local function subtreeIdSet(entry, out)
+    out = out or {}
+    if entry == nil then return out end
+    out[entry.id] = true
+    for _, child in ipairs(entry.children or {}) do
+        subtreeIdSet(child, out)
+    end
+    return out
+end
+
+-- Applies a resolved drop for the dragged Entry `id` via host callbacks. Bumps mutateVersion so
+-- the view rebuilds. No-op when there is no active scope or the target is a no-op (same scope).
+---@param id integer
+---@param target Watchdog.DropTarget|nil
+function Manager:ApplyDrop(id, target)
+    if target == nil then return end
+    local scopeKey = self:ActiveScopeKey()
+    if scopeKey == nil then return end
+    if target.kind == "reorder" then
+        if self.onReorder == nil then return end
+        pcall(self.onReorder, scopeKey, id, target.parentId, target.index)
+    elseif target.kind == "nest" then
+        if self.onNest == nil or target.parentId == nil then return end
+        pcall(self.onNest, scopeKey, id, target.parentId)
+        if not self:IsExpanded(scopeKey, target.parentId) then
+            self:ToggleExpand(scopeKey, target.parentId)
+        end
+    elseif target.kind == "scope" then
+        if self.onMoveScope == nil or target.scopeKey == nil then return end
+        if target.scopeKey == scopeKey then return end
+        pcall(self.onMoveScope, scopeKey, target.scopeKey, id)
+    else
+        return
+    end
+    self.mutateVersion = self.mutateVersion + 1
+end
+
+-- Resolves mouse screen Y + optional inactive-tab hit into a DropTarget for `dragId`, then
+-- ApplyDrop. Used from ONDRAGCOMPLETE on row panels (client half).
+---@param dragId integer
+function Manager:_completeDrag(dragId)
+    self.dragId = nil
+    local scopeDrop = self.pendingScopeDrop
+    self.pendingScopeDrop = nil
+    local scope = self:ActiveScope()
+    if scope == nil then return end
+    local mouseY = nil
+    pcall(function()
+        if Mouse ~= nil and Mouse.GetY ~= nil then mouseY = Mouse.GetY() end
+    end)
+
+    local subtreeIds = {}
+    local found = Store.FindById(scope.doc, dragId)
+    if found ~= nil then subtreeIdSet(found, subtreeIds) end
+
+    local rows = {}
+    local visible = self:VisibleRows()
+    local treeTop = nil
+    pcall(function()
+        if self.treePanel ~= nil then
+            treeTop = self.treePanel.y or 0
+            if prettyui ~= nil and prettyui.Tooltip ~= nil and prettyui.Tooltip.getContext ~= nil then
+                local ctx = prettyui.Tooltip.getContext(self.treePanel)
+                if ctx ~= nil and type(ctx.position) == "function" then
+                    local _, ay = ctx.position(self.treePanel)
+                    if ay ~= nil then treeTop = ay end
+                end
+            end
+        end
+    end)
+    local scroll = 0
+    pcall(function()
+        local tp = self.treePanel
+        if tp == nil then return end
+        local getter = rawget(tp, "GetScrollPos")
+        if type(getter) == "function" then
+            scroll = getter(tp) or 0
+        else
+            local sy = rawget(tp, "scrollY")
+            if type(sy) == "number" then scroll = sy end
+        end
+    end)
+    local localY = mouseY or 0
+    if mouseY ~= nil and treeTop ~= nil then
+        localY = mouseY - treeTop + scroll
+    end
+    for i, row in ipairs(visible) do
+        rows[#rows + 1] = {
+            id = row.id,
+            kind = row.kind,
+            parentId = row.parentId,
+            index = row.index,
+            y = (i - 1) * ROW_H,
+            h = ROW_H,
+        }
+    end
+    -- Prefer the inactive-tab hit subscription (pendingScopeDrop); fall back to geometry poll
+    -- if the tab hover never fired (e.g. drop on the very edge of the tab strip).
+    local scopeKey = scopeDrop
+    if scopeKey == nil and mouseY ~= nil and #self:ScopeList() > 1 and self.tabs ~= nil then
+        local activeKey = self:ActiveScopeKey()
+        for i, s in ipairs(self:ScopeList()) do
+            if s.key ~= activeKey then
+                local tab
+                pcall(function() tab = self.tabs:GetTab(i) end)
+                local hit = tab and tab.hit
+                if hit ~= nil then
+                    local hx, hy, hw, hh = 0, 0, 0, 0
+                    pcall(function()
+                        hx, hy = hit.x or 0, hit.y or 0
+                        if prettyui ~= nil and prettyui.Tooltip ~= nil and prettyui.Tooltip.getContext ~= nil then
+                            local ctx = prettyui.Tooltip.getContext(hit)
+                            if ctx ~= nil and type(ctx.position) == "function" then
+                                local ax, ay = ctx.position(hit)
+                                if ax ~= nil then hx = ax end
+                                if ay ~= nil then hy = ay end
+                            end
+                        end
+                        hw = hit.width or 0
+                        hh = hit.height or TAB_BASELINE
+                    end)
+                    local mx = nil
+                    pcall(function()
+                        if Mouse ~= nil and Mouse.GetX ~= nil then mx = Mouse.GetX() end
+                    end)
+                    if mx ~= nil and mx >= hx and mx <= hx + hw and mouseY >= hy and mouseY <= hy + hh then
+                        scopeKey = s.key
+                        break
+                    end
+                end
+            end
+        end
+    end
+    local target = Manager.ResolveDropTarget(localY, rows, {
+        dragId = dragId,
+        dragSubtreeIds = subtreeIds,
+        scopeKey = scopeKey,
+    })
+    self:ApplyDrop(dragId, target)
+    self:_rebuild()
 end
 
 -- Reacts to a row press (pure part, so the double-click gating in the view can be tested against
@@ -503,7 +728,38 @@ function Manager:_ensureTabs()
     end
     self.tabs = tabs
     self.tabsScopeSig = sig
+    self:_wireScopeTabDrops()
     return true
+end
+
+-- Subscribe inactive PrettyUI tab `hit` layers as cross-scope drop targets (#92). While a row
+-- drag is live, hovering an inactive tab arms `pendingScopeDrop`; leave clears it. Absent when
+-- logged out (only one scope → nothing to wire). Inline ui.Hook.* (no variable-ized channel).
+function Manager:_wireScopeTabDrops()
+    self.pendingScopeDrop = nil
+    if self.tabs == nil or self.tabs.GetTab == nil then return end
+    local scopes = self:ScopeList()
+    if #scopes < 2 then return end
+    for i, scope in ipairs(scopes) do
+        local capturedKey = scope.key
+        pcall(function()
+            local tab = self.tabs:GetTab(i)
+            local hit = tab and tab.hit
+            if hit == nil or hit.Subscribe == nil then return end
+            hit:Subscribe(ui.Hook.ONMOUSEOVER, function()
+                if self.dragId ~= nil and capturedKey ~= self:ActiveScopeKey() then
+                    self.pendingScopeDrop = capturedKey
+                end
+                return false
+            end)
+            hit:Subscribe(ui.Hook.ONMOUSELEAVE, function()
+                if self.pendingScopeDrop == capturedKey then
+                    self.pendingScopeDrop = nil
+                end
+                return false
+            end)
+        end)
+    end
 end
 
 ---@param contentParent ui.ComponentCollection
@@ -776,8 +1032,25 @@ function Manager:_rebuild()
             rowPanel = ui.Panel.new(treeParent)
             rowPanel.isVertical = false
             rowPanel.spacing = ROW_GAP
-            rowPanel.clickthrough = true
+            rowPanel.clickthrough = false
             rowPanel:SetSize(rowW, ROW_H)
+            -- Native drag gesture (#92): delay/dead-zone so short clicks still hit children.
+            rowPanel.dragConfig = {
+                dragDelayTicks = 3,
+                deadZone = 6,
+                renderBehaviour = (ui.DragRenderBehaviour and ui.DragRenderBehaviour.TRANSPARENT_OVERLAY)
+                    or "TRANSPARENT_OVERLAY",
+            }
+            rowPanel:Subscribe(ui.Hook.ONDRAG, function()
+                self.dragId = capturedRow.id
+                self.pendingScopeDrop = nil
+                self.pendingDeleteId = nil
+                return true
+            end)
+            rowPanel:Subscribe(ui.Hook.ONDRAGCOMPLETE, function()
+                self:_completeDrag(capturedRow.id)
+                return true
+            end)
         end)
         if not okRow or rowPanel == nil then
             rowPanel = treeParent

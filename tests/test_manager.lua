@@ -375,3 +375,154 @@ function TestManager:testActiveScopeIndexFollowsSelection()
     mgr:SetActiveScope("player_alice")
     luaunit.assertEquals(mgr:_activeScopeIndex(), 2)
 end
+
+--- Drop-target resolution (#92) -----------------------------------------------------------
+-- Pure hit-test against flattened rows (y/h + parentId/index). Scope drops are injected by the
+-- render half when the pointer is over an inactive tab (absent when logged out).
+
+local function dropRow(id, kind, parentId, index, y, h)
+    return { id = id, kind = kind, parentId = parentId, index = index, y = y, h = h or 22 }
+end
+
+function TestManager:testResolveDropTargetNestsOnGroupMiddleBand()
+    local rows = {
+        dropRow(1, "group", nil, 1, 0, 22),
+        dropRow(2, "alert", 1, 1, 22, 22),
+    }
+    local t = Manager.ResolveDropTarget(11, rows, { dragId = 2 })
+    luaunit.assertEquals(t.kind, "nest")
+    luaunit.assertEquals(t.parentId, 1)
+end
+
+function TestManager:testResolveDropTargetReordersBeforeSibling()
+    local rows = {
+        dropRow(1, "alert", nil, 1, 0, 22),
+        dropRow(2, "alert", nil, 2, 22, 22),
+        dropRow(3, "alert", nil, 3, 44, 22),
+    }
+    -- Pointer in the top half of row 2 → insert before it (index 2).
+    local t = Manager.ResolveDropTarget(22 + 4, rows, { dragId = 3 })
+    luaunit.assertEquals(t.kind, "reorder")
+    luaunit.assertNil(t.parentId)
+    luaunit.assertEquals(t.index, 2)
+end
+
+function TestManager:testResolveDropTargetReordersAfterSibling()
+    local rows = {
+        dropRow(1, "alert", nil, 1, 0, 22),
+        dropRow(2, "alert", nil, 2, 22, 22),
+    }
+    local t = Manager.ResolveDropTarget(22 + 18, rows, { dragId = 1 })
+    luaunit.assertEquals(t.kind, "reorder")
+    luaunit.assertNil(t.parentId)
+    luaunit.assertEquals(t.index, 3) -- after index 2
+end
+
+function TestManager:testResolveDropTargetGroupEdgeIsReorderNotNest()
+    -- Top/bottom quarters of a group row are sibling reorder, not nest.
+    local rows = {
+        dropRow(1, "group", nil, 1, 0, 22),
+        dropRow(2, "alert", nil, 2, 22, 22),
+    }
+    local t = Manager.ResolveDropTarget(2, rows, { dragId = 2 }) -- top of group
+    luaunit.assertEquals(t.kind, "reorder")
+    luaunit.assertNil(t.parentId)
+    luaunit.assertEquals(t.index, 1)
+end
+
+function TestManager:testResolveDropTargetRefusesNestIntoOwnDescendant()
+    local rows = {
+        dropRow(1, "group", nil, 1, 0, 22),
+        dropRow(2, "group", 1, 1, 22, 22),
+    }
+    -- Dragging outer group onto inner's middle band would cycle — fall through to reorder.
+    local t = Manager.ResolveDropTarget(22 + 11, rows, {
+        dragId = 1,
+        dragSubtreeIds = { [1] = true, [2] = true },
+    })
+    luaunit.assertEquals(t.kind, "reorder")
+    luaunit.assertEquals(t.parentId, 1)
+end
+
+function TestManager:testResolveDropTargetScopeWhenInactiveTabHit()
+    local rows = { dropRow(1, "alert", nil, 1, 0, 22) }
+    local t = Manager.ResolveDropTarget(0, rows, { dragId = 1, scopeKey = "player_alice" })
+    luaunit.assertEquals(t.kind, "scope")
+    luaunit.assertEquals(t.scopeKey, "player_alice")
+end
+
+function TestManager:testResolveDropTargetNilWhenNoRows()
+    luaunit.assertNil(Manager.ResolveDropTarget(10, {}, { dragId = 1 }))
+end
+
+function TestManager:testVisibleRowsCarryParentIdAndIndex()
+    local doc = bucket({
+        group(1, "g", { alert(2, "a"), alert(3, "b") }),
+        alert(4, "root"),
+    })
+    local mgr = self:makeManager({ { key = "global", label = "Global", doc = doc } })
+    local rows = mgr:VisibleRows()
+    luaunit.assertEquals(rows[1].parentId, nil)
+    luaunit.assertEquals(rows[1].index, 1)
+    luaunit.assertEquals(rows[2].parentId, 1)
+    luaunit.assertEquals(rows[2].index, 1)
+    luaunit.assertEquals(rows[3].parentId, 1)
+    luaunit.assertEquals(rows[3].index, 2)
+    luaunit.assertEquals(rows[4].parentId, nil)
+    luaunit.assertEquals(rows[4].index, 2)
+end
+
+function TestManager:testApplyDropReportsReorderToHost()
+    local calls = {}
+    local mgr = self:makeManager(
+        { { key = "global", label = "Global", doc = bucket({ alert(1, "a"), alert(2, "b") }) } },
+        {
+            onReorder = function(scopeKey, id, parentId, index)
+                calls[#calls + 1] = { scopeKey, id, parentId, index }
+            end,
+        }
+    )
+    mgr:ApplyDrop(2, { kind = "reorder", parentId = nil, index = 1 })
+    luaunit.assertEquals(calls, { { "global", 2, nil, 1 } })
+end
+
+function TestManager:testApplyDropReportsNestToHost()
+    local calls = {}
+    local mgr = self:makeManager(
+        { { key = "global", label = "Global", doc = bucket({ group(1, "g", {}), alert(2, "a") }) } },
+        {
+            onNest = function(scopeKey, id, parentId)
+                calls[#calls + 1] = { scopeKey, id, parentId }
+            end,
+        }
+    )
+    mgr:ApplyDrop(2, { kind = "nest", parentId = 1 })
+    luaunit.assertEquals(calls, { { "global", 2, 1 } })
+end
+
+function TestManager:testApplyDropReportsScopeMoveToHost()
+    local calls = {}
+    local mgr = self:makeManager(
+        {
+            { key = "global", label = "Global", doc = bucket({ alert(1, "a") }) },
+            { key = "player_alice", label = "Alice", doc = bucket({}) },
+        },
+        {
+            onMoveScope = function(fromKey, toKey, id)
+                calls[#calls + 1] = { fromKey, toKey, id }
+            end,
+        }
+    )
+    mgr:ApplyDrop(1, { kind = "scope", scopeKey = "player_alice" })
+    luaunit.assertEquals(calls, { { "global", "player_alice", 1 } })
+end
+
+function TestManager:testApplyDropScopeNoOpsWhenSameScope()
+    local calls = {}
+    local mgr = self:makeManager(
+        { { key = "global", label = "Global", doc = bucket({ alert(1, "a") }) } },
+        { onMoveScope = function(...) calls[#calls + 1] = { ... } end }
+    )
+    mgr:ApplyDrop(1, { kind = "scope", scopeKey = "global" })
+    luaunit.assertEquals(calls, {})
+end
