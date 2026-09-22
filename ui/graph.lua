@@ -1471,7 +1471,7 @@ function Editor:drawConnections()
             local src = fromGeom.byName[c.fromPin]
             if ax and bx and src then
                 local color = Wire.ColorFor(src.kind, src.dataType)
-                Wire.DrawCurve(self.canvas, self.view, ax, ay, 1, bx, by, -1, color)
+                Wire.DrawCurve(self.canvas, self.view, ax, ay, 1, bx, by, -1, color, self:viewportRect())
             end
         end
     end
@@ -1486,7 +1486,7 @@ function Editor:drawPendingWire()
     local gx, gy = self.view:ToGraph(self.mouse.x, self.mouse.y)
     local color = Wire.ColorFor(self.wire.entry.kind, self.wire.entry.dataType)
     local fixedDir = Wire.DirFor(self.wire.entry.direction)
-    Wire.DrawCurve(self.canvas, self.view, fx, fy, fixedDir, gx, gy, -fixedDir, color)
+    Wire.DrawCurve(self.canvas, self.view, fx, fy, fixedDir, gx, gy, -fixedDir, color, self:viewportRect())
 end
 
 function Editor:draw()
