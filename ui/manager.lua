@@ -1164,10 +1164,10 @@ function Manager:_mountBulkBar(y)
     local x = 0
     local gap = Theme.MANAGER_TOOLBAR_GAP
 
-    local function addButton(label, onPress)
+    local function addButton(label, onPress, spriteID)
         local btn
         local measuredW = select(1, prettyui.SimpleButton.getSize(label))
-        local w = math.max(70, measuredW + 16)
+        local w = math.max(70, measuredW + 16) + (spriteID and 24 or 0)
         if x > 0 and x + w > self.window.w - 2 * Theme.MANAGER_PAGE_PAD then
             x = 0
             y = y + Theme.MANAGER_BULK_BAR_H + 4
@@ -1180,6 +1180,15 @@ function Manager:_mountBulkBar(y)
             })
         end)
         if btn ~= nil then
+            if spriteID then
+                btn.content:SetPos(30, 0)
+                btn.content:SetSize(-38, 0, 1.0, 1.0)
+                local icon = ui.Sprite.new(btn.root)
+                icon.spriteID = spriteID
+                icon:SetSize(18, 18)
+                icon:SetPos(8, -9, 0, 0.5)
+                icon.clickthrough = true
+            end
             self.bulkBarButtons[#self.bulkBarButtons + 1] = btn
             x = x + w + gap
         end
@@ -1208,7 +1217,7 @@ function Manager:_mountBulkBar(y)
 
     addButton("Export", function()
         self:BulkExport(ids)
-    end)
+    end, id.Sprite.RS3_ICON_EXTERNAL_LINK_24PX_2)
     addButton("Delete", function()
         self:_openConfirm({
             title = DELETE_CONFIRM_TITLE,
@@ -1220,7 +1229,7 @@ function Manager:_mountBulkBar(y)
                 self:_rebuild()
             end,
         })
-    end)
+    end, id.Sprite.HUD_COMBAT_BTN_BIN)
     return y - startY + Theme.MANAGER_BULK_BAR_H
 end
 

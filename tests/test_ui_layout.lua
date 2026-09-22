@@ -61,6 +61,7 @@ function TestUILayout:testManagerControlsAtMinimumWidth()
         Layer = { new = component },
         Panel = { new = component },
         Text = { new = component },
+        Sprite = { new = component },
         Check = { new = component },
         AlignMode = { TOPLEFT = 1, CENTRE = 2 },
         CheckAlignMode = { LEFT = 1 },
@@ -85,7 +86,7 @@ function TestUILayout:testManagerControlsAtMinimumWidth()
             return c
         end,
     }
-    id = { Font = { MUSEO_SANS_15PT_REGULAR = 1 }, StyleSheet = { CHECKBOX_DEFAULT = 1 } }
+    id = { Sprite = { RS3_ICON_EXTERNAL_LINK_24PX_2 = 100, HUD_COMBAT_BTN_BIN = 101 }, Font = { MUSEO_SANS_15PT_REGULAR = 1 }, StyleSheet = { CHECKBOX_DEFAULT = 1 } }
     config = { Cursor = { CURSOR_OPEN = 1 } }
     local buttons = {}
     local function button(parent, text, action, opts)
