@@ -1545,8 +1545,8 @@ function Editor:drawZoomTick()
     if w <= 0 or h <= 0 then return end
     local n = #View.Rungs()
     local t = (View.RungIndex(1.0) - 1) / (n - 1)
-    local x = math.floor(t * (w - 1) + 0.5) - 4
-    c:AddLine(x, 2, x, h - 2, 1, Theme.Vec4(Theme.COL_ZOOM_TICK))
+    local x = math.floor(t * (w - 1) + 0.5) - 8
+    c:AddLine(x, 2, x, h - 2, 2, Theme.Vec4(Theme.COL_ZOOM_TICK))
 end
 
 --- Visibility
@@ -1757,17 +1757,25 @@ function Editor:Mount(contentParent, overlayParent)
     self.overlayParent = overlayParent
     self:syncContentOrigin()
 
-    local okCanvas, canvas = pcall(function() return ui.Canvas.new(contentParent) end)
+    -- A Canvas can draw outside its own bounds. Its parent Layer supplies the
+    -- viewport clip; offset the Canvas back so graph/hit-test coordinates stay
+    -- relative to the content origin.
+    self.canvasViewport = ui.Layer.new(contentParent)
+    self.canvasViewport:SetPos(0, EDITOR_TOOLBAR_H)
+    self.canvasViewport:SetSize(0, -EDITOR_TOOLBAR_H, 1.0, 1.0)
+    self.canvasViewport.clickthrough = true
+    local okCanvas, canvas = pcall(function() return ui.Canvas.new(self.canvasViewport) end)
     if not okCanvas or canvas == nil then
+        self.canvasViewport:Destroy()
+        self.canvasViewport = nil
         self.contentParent = nil
         self.overlayParent = nil
         if log ~= nil then log("Watchdog: Canvas Mount failed") end
         return
     end
     self.canvas = canvas
-    self.canvas:SetPos(0, 0)
-    -- Fill the content parent; relative anchors track host resize.
-    self.canvas:SetSize(0, 0, 1.0, 1.0)
+    self.canvas:SetPos(0, -EDITOR_TOOLBAR_H)
+    self.canvas:SetSize(0, EDITOR_TOOLBAR_H, 1.0, 1.0)
     self.canvas.clickthrough = true
 
     -- Invisible capture on the overlay (not under content) so it can grow true full-screen.
@@ -1904,6 +1912,10 @@ function Editor:Unmount()
     if self.canvas ~= nil then
         pcall(function() self.canvas:Destroy() end)
         self.canvas = nil
+    end
+    if self.canvasViewport ~= nil then
+        self.canvasViewport:Destroy()
+        self.canvasViewport = nil
     end
     self.contentParent = nil
     self.overlayParent = nil

@@ -12,8 +12,9 @@ local function component(parent)
     function c:SetPos(x, y)
         self.x, self.y = x, y
     end
-    function c:SetSize(w, h)
-        self.width, self.height = w, h
+    function c:SetSize(w, h, wp, hp)
+        self.width = w + (wp or 0) * (self.parent and self.parent.width or 0)
+        self.height = h + (hp or 0) * (self.parent and self.parent.height or 0)
     end
     function c:MoveToFront()
         if not self.parent then
@@ -223,4 +224,28 @@ function TestWindowChrome:testTooltipStaysBelowMaximizeAndRestore()
     luaunit.assertEquals({ tip.root.x, tip.root.y }, { 1640, 35 })
     self.resize:Sync(false)
     luaunit.assertTrue(tip.root.hidden)
+end
+
+function TestWindowChrome:testGraphCanvasHasSeparateViewportBelowToolbar()
+    local content = component(nil)
+    content:SetSize(900, 550)
+    local editor = setmetatable({}, Editor)
+    for _, method in ipairs({
+        "syncContentOrigin",
+        "mountToolbar",
+        "positionCapture",
+        "frontOverlayInteractives",
+        "resetView",
+        "SetVisible",
+    }) do
+        editor[method] = function() end
+    end
+    editor:Mount(content, self.overlay)
+    local viewport = editor.canvasViewport
+    luaunit.assertEquals(viewport.parent, content)
+    luaunit.assertEquals(editor.canvas.parent, viewport)
+    luaunit.assertEquals({ viewport.x, viewport.y, viewport.width, viewport.height }, { 0, 84, 900, 466 })
+    -- Keep rendering and hit testing in the same content coordinate system.
+    luaunit.assertEquals(viewport.y + editor.canvas.y, 0)
+    luaunit.assertEquals(editor.canvas.height, content.height)
 end
