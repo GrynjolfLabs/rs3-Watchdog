@@ -1711,8 +1711,8 @@ end
 function Editor:layoutToolbar()
     local win = self.window
     local x, y, gap = win.x + 12, win.y + 8, 8
-    local backW = math.max(144, select(1, prettyui.SimpleButton.getSize("Back to alerts")))
-    local resetW = math.max(96, select(1, prettyui.SimpleButton.getSize("Reset view")))
+    local backW = math.max(144, select(1, prettyui.SimpleButton.getSize("Back to alerts")) + 24)
+    local resetW = math.max(96, select(1, prettyui.SimpleButton.getSize("Reset view")) + 24)
     local renameW = math.max(80, select(1, prettyui.SimpleButton.getSize("Rename")))
     local right = win.x + win.w - 12
     if self.toolbarBackground ~= nil then
@@ -1815,6 +1815,18 @@ function Editor:Mount(contentParent, overlayParent)
     self:SetVisible(self.visible)
 end
 
+-- Decorative sprites share the labelled button's click target and lifecycle.
+local function addToolbarIcon(button, label, spriteID)
+    button.root:SetSize(button.root.width + 24, button.root.height)
+    label:SetPos(30, 0)
+    label:SetSize(-38, 0, 1.0, 1.0)
+    local icon = ui.Sprite.new(button.root)
+    icon.spriteID = spriteID
+    icon:SetSize(18, 18)
+    icon:SetPos(8, -9, 0, 0.5)
+    icon.clickthrough = true
+end
+
 ---@param overlayParent ui.ComponentCollection
 function Editor:mountToolbar(overlayParent)
     local okSl, slider = pcall(function() return ui.Slider.new(overlayParent) end)
@@ -1853,7 +1865,7 @@ function Editor:mountToolbar(overlayParent)
     self.resetViewButton = prettyui.SimpleButton.new(overlayParent, "Reset view", function()
         self:onResetView()
     end, { height = 28, tooltip = "Reset zoom and position" })
-    self.plusButton = prettyui.FancyButton.new(overlayParent, "+ Add alert node", function()
+    self.plusButton = prettyui.FancyButton.new(overlayParent, "Add alert node", function()
         self:openPaletteFromPlus()
     end, { variant = "positive", tooltip = "Add a trigger or action to this alert" })
     self.backButton = prettyui.SimpleButton.new(overlayParent, "Back to alerts", function()
@@ -1863,6 +1875,9 @@ function Editor:mountToolbar(overlayParent)
         if self.onRename ~= nil then self.onRename() end
     end, { height = 28, tooltip = "Rename this alert" })
 
+    addToolbarIcon(self.backButton, self.backButton.content, id.Sprite.RS3_ICON_BACK_43PX_2)
+    addToolbarIcon(self.plusButton, self.plusButton.label, id.Sprite.RS3_ICON_PURCHASE_MORE_0)
+    addToolbarIcon(self.resetViewButton, self.resetViewButton.content, id.Sprite.RS3_ICON_WARDROBE_VIEW_GRID_24PX_2)
     self:layoutToolbar()
 end
 
