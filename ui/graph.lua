@@ -4,6 +4,7 @@
 -- Content-local (0,0) is content top-left (no WINDOW_HEADER_H); overlay chrome uses toScreen.
 
 local Dialog = require("ui/dialog")
+local PrimaryButton = require("ui/primary_button")
 local Theme    = require("ui/theme")
 local View     = require("ui/view")
 local Node     = require("ui/node")
@@ -1713,7 +1714,7 @@ function Editor:layoutToolbar()
     local x, y, gap = win.x + 12, win.y + 8, 8
     local backW = math.max(144, select(1, prettyui.SimpleButton.getSize("Back to alerts")) + 24)
     local resetW = math.max(96, select(1, prettyui.SimpleButton.getSize("Reset view")) + 24)
-    local renameW = math.max(80, select(1, prettyui.SimpleButton.getSize("Rename")))
+    local renameW = math.max(80, select(1, prettyui.SimpleButton.getSize("Rename")) + 24)
     local right = win.x + win.w - 12
     if self.toolbarBackground ~= nil then
         self.toolbarBackground:SetPos(win.x, win.y)
@@ -1876,7 +1877,8 @@ function Editor:mountToolbar(overlayParent)
     end, { height = 28, tooltip = "Rename this alert" })
 
     addToolbarIcon(self.backButton, self.backButton.content, id.Sprite.RS3_ICON_BACK_43PX_2)
-    addToolbarIcon(self.plusButton, self.plusButton.label, id.Sprite.RS3_ICON_PURCHASE_MORE_0)
+    PrimaryButton.fit(self.plusButton, "Add alert node", id.Sprite.RS3_ICON_PURCHASE_MORE_0)
+    addToolbarIcon(self.renameButton, self.renameButton.content, id.Sprite.RS3_ICON_EDIT_23PX_0)
     addToolbarIcon(self.resetViewButton, self.resetViewButton.content, id.Sprite.RS3_ICON_WARDROBE_VIEW_GRID_24PX_2)
     self:layoutToolbar()
 end

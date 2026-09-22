@@ -11,6 +11,7 @@
 local Theme = require("ui/theme")
 local Export = require("export")
 local Dialog = require("ui/dialog")
+local PrimaryButton = require("ui/primary_button")
 local Confirm = require("ui/confirm")
 local ImportExport = require("ui/import_export")
 
@@ -1126,12 +1127,7 @@ function Manager:_mountToolbar()
         local button
         if primary then
             button = self.layoutHost:AddFancyButton(text, action, options)
-            button.root:SetSize(button.root.width, options.height)
-            button.left:SetSize(25, options.height)
-            button.middle.isTiling = false
-            button.middle:SetSize(-50, options.height, 1.0)
-            button.right:SetSize(25, options.height)
-            button.label:SetSize(-50, options.height, 1.0)
+            PrimaryButton.fit(button, text)
         else
             button = self.layoutHost:AddSimpleButton(text, action, options)
         end
@@ -1139,8 +1135,8 @@ function Manager:_mountToolbar()
         return button
     end
     local x = Theme.MANAGER_PAGE_PAD
-    local createW = select(1, prettyui.FancyButton.getSize("+ New alert", { variant = "positive" }))
-    add("+ New alert", x, function() self:CreateAlert(); self:_rebuild() end, true, createW)
+    local create = add("+ New alert", x, function() self:CreateAlert(); self:_rebuild() end, true)
+    local createW = create.root.width
     add("+ New group", x + createW + gap, function()
         local id = self:CreateGroup()
         if type(id) == "number" then self.pendingRenameId = id end
