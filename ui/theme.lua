@@ -132,7 +132,6 @@ Theme.WINDOW_W             = 900
 Theme.WINDOW_H             = 560
 Theme.WINDOW_HEADER_H      = 32   -- PrettyUI TITLE_HEIGHT
 Theme.WINDOW_BORDER        = 8    -- PrettyUI BORDER; content is inset this much
-Theme.WINDOW_CLOSE_RESERVE = 34   -- CLOSE_SIZE (20) + 14; keep PLUS left of close
 Theme.WINDOW_TITLE         = "Watchdog - Editor"
 
 --- Palette (screen-space popup) + toolbar -----------------------------------------------
@@ -156,24 +155,22 @@ Theme.DOUBLECLICK_DIST  = 6   -- max screen-px drift between the two clicks
 
 -- PrettyUI Tabs uses MANAGER_TAB_BASELINE ≈ 42 for the tab header strip (see prettyui/src/tabs.lua).
 Theme.MANAGER_TAB_BASELINE   = 42
-Theme.MANAGER_ROW_H          = 22
-Theme.MANAGER_HEADER_H       = 20
+Theme.MANAGER_ROW_H          = 32
+Theme.MANAGER_HEADER_H       = 26
 -- Wider than the checkbox glyph so the "Enabled" header is not ellipsized.
--- ui.Check.buttonSize is still capped to MANAGER_ROW_H, so the tick box stays 20px.
+-- The PrettyUI checkbox stays 14px inside a 28px click target.
 Theme.MANAGER_ENABLE_W       = 72
-Theme.MANAGER_SELECT_W       = 22   -- multi-select checkbox in the Actions cluster (#93)
-Theme.MANAGER_ACT_W          = 22   -- pencil / export / trash SpriteButton size
+Theme.MANAGER_SELECT_W       = 48
+Theme.MANAGER_ACT_W          = 28
 Theme.MANAGER_ACT_COUNT      = 3    -- pencil + export + trash per row (#94)
-Theme.MANAGER_REORDER_W      = 22
+Theme.MANAGER_REORDER_W      = 28
 Theme.MANAGER_REORDER_COUNT  = 3
-Theme.MANAGER_ROW_GAP        = 2
-Theme.MANAGER_ROW_INDENT     = 12
-Theme.MANAGER_PAGE_PAD       = 8
-Theme.MANAGER_TOOLBAR_H      = 27   -- PrettyUI FancyButton height
-Theme.MANAGER_TOOLBAR_PAD    = 8
-Theme.MANAGER_TOOLBAR_GAP    = 6
+Theme.MANAGER_ROW_GAP        = 4
+Theme.MANAGER_ROW_INDENT     = 20
+Theme.MANAGER_PAGE_PAD       = 12
+Theme.MANAGER_TOOLBAR_GAP    = 8
 Theme.MANAGER_BULK_BAR_H     = 30
-Theme.MANAGER_TREE_TOP       = Theme.MANAGER_TAB_BASELINE + 4  -- tree below tab strip (no bulk bar)
+Theme.MANAGER_TREE_TOP       = 92
 Theme.MANAGER_IMPORT_EXPORT_W = 440
 Theme.MANAGER_IMPORT_EXPORT_H = 420
 

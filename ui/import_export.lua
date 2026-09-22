@@ -73,20 +73,20 @@ function ImportExport.mountImport(parent, opts)
     local field
     local maxLength = opts.maxLength or ImportExport.DEFAULT_MAX_LENGTH
     return Dialog.mount(parent, {
-        title = "Import",
+        title = "Import alerts",
         width = Theme.MANAGER_IMPORT_EXPORT_W,
         height = Theme.MANAGER_IMPORT_EXPORT_H,
         onDismiss = opts.onDismiss,
         content = function(win)
             field = addBody(win, opts.message, {
                 text = opts.text or "",
-                placeholder = "Paste export JSON here",
+                placeholder = "Paste alert code here",
                 maxLength = maxLength,
                 height = 280,
             })
         end,
         actions = {
-            { label = "Close" },
+            { label = "Cancel" },
             {
                 label = "Import",
                 variant = "positive",
@@ -100,11 +100,11 @@ function ImportExport.mountImport(parent, opts)
                     if opts.onImport == nil then return true end
                     local okCall, ok, err = pcall(opts.onImport, text)
                     if not okCall then
-                        stackError(parent, "Import", ok)
+                        stackError(parent, "Could not import alerts", ok)
                         return false
                     end
                     if ok then return true end
-                    stackError(parent, "Import", err)
+                    stackError(parent, "Could not import alerts", err)
                     return false
                 end,
             },

@@ -806,4 +806,14 @@ function TestRuntime:testAddAlertPreloadsTheGraphOnce()
     luaunit.assertEquals(calls[1].resource, "restored")
 end
 
+
+function TestRuntime:testRenameAlertTargetsItsBucketWhenIdsOverlap()
+    local global = self.runtime:AddAlert(1, "global alert", nil, true, "global")
+    local player = self.runtime:AddAlert(1, "player alert", nil, true, "player_test")
+    luaunit.assertTrue(self.runtime:RenameAlert(1, "renamed", "player_test"))
+    luaunit.assertEquals(global.name, "global alert")
+    luaunit.assertEquals(player.name, "renamed")
+    luaunit.assertFalse(self.runtime:RenameAlert(1, "missing", "player_other"))
+end
+
 return TestRuntime

@@ -3,6 +3,7 @@
 -- (mux overlay sits above the PrettyUI window, so clickables must be overlay children above capture).
 -- Content-local (0,0) is content top-left (no WINDOW_HEADER_H); overlay chrome uses toScreen.
 
+local Dialog = require("ui/dialog")
 local Theme    = require("ui/theme")
 local View     = require("ui/view")
 local Node     = require("ui/node")
@@ -13,6 +14,7 @@ local ColorPopup = require("ui/color_popup")
 local IfaceScale = require("ui/iface_scale")
 local InvViewer = require("ui/inv_viewer")
 
+local EDITOR_TOOLBAR_H = 84
 local Editor = {}
 Editor.__index = Editor
 
@@ -69,7 +71,10 @@ end
 ---@param id integer
 ---@param graph LibNodeGraph.Graph
 ---@param layout Watchdog.Layout|nil
-function Editor:BindEntry(id, graph, layout)
+---@param name string|nil
+function Editor:BindEntry(id, graph, layout, name)
+    self.alertName = name or "New Alert"
+    if self.alertNameLabel ~= nil then self.alertNameLabel.content = self.alertName end
     self:closeControlEditor()
     self:closeColorPopup()
     self.palette:Close()
@@ -115,7 +120,7 @@ end
 -- Content-local viewport; origin (0,0) is PrettyUI content top-left (no header inset).
 function Editor:viewportRect()
     local win = self.window
-    return 0, 0, win.w, win.h
+    return 0, EDITOR_TOOLBAR_H, win.w, math.max(1, win.h - EDITOR_TOOLBAR_H)
 end
 
 -- Screen → content-local. self.window.x/y must be the live content origin (PrettyUI owns drag).
@@ -132,7 +137,7 @@ end
 ---@return number gy
 function Editor:viewCenterGraph()
     local w, h = self.window.w, self.window.h
-    return self.view:ToGraph(w * 0.5, h * 0.5)
+    return self.view:ToGraph(w * 0.5, EDITOR_TOOLBAR_H + (h - EDITOR_TOOLBAR_H) * 0.5)
 end
 
 -- Re-read contentParent's absolute screen rect; nested .x/.y are parent-relative.
@@ -173,14 +178,19 @@ end
 
 -- Capture under palette under toolbar under transient editors (overlay above PrettyUI window).
 function Editor:frontOverlayInteractives()
+    if Dialog.depth(self.overlayParent) > 0 then return end
     pcall(function() if self.capture ~= nil then self.capture:MoveToFront() end end)
     InvViewer.Front(self)
     pcall(function() if self.paletteCanvas ~= nil then self.paletteCanvas:MoveToFront() end end)
+    if self.toolbarBackground ~= nil then self.toolbarBackground:MoveToFront() end
+    if self.alertNameLabel ~= nil then self.alertNameLabel:MoveToFront() end
+    if self.renameButton ~= nil then self.renameButton.root:MoveToFront() end
     if self.backButton ~= nil then self.backButton.root:MoveToFront() end
     if self.zoomSlider ~= nil then pcall(function() self.zoomSlider:MoveToFront() end) end
     if self.zoomTickCanvas ~= nil then pcall(function() self.zoomTickCanvas:MoveToFront() end) end
     if self.resetViewButton ~= nil then self.resetViewButton.root:MoveToFront() end
     if self.plusButton ~= nil then self.plusButton.root:MoveToFront() end
+    frontToolbarTooltip(self.renameButton)
     frontToolbarTooltip(self.backButton)
     frontToolbarTooltip(self.resetViewButton)
     frontToolbarTooltip(self.plusButton)
@@ -331,23 +341,9 @@ local function safeSliderStyle()
     return nil
 end
 
-local TOOLBAR_BTN = 18
-local TOOLBAR_PAD = 6
-
--- Content rect → PrettyUI title strip (window root). Overlay toolbar lives here.
-local function titleStrip(win)
-    local border = Theme.WINDOW_BORDER
-    local headerH = Theme.WINDOW_HEADER_H
-    return win.x - border, win.y - headerH, win.w + border * 2, headerH
-end
-
 -- PLUS screen origin and size; palette-from-plus hangs off the bottom of this.
 local function plusScreenPos(win)
-    local titleX, titleY, titleW, headerH = titleStrip(win)
-    local bs, pad = TOOLBAR_BTN, TOOLBAR_PAD
-    local plusX = titleX + titleW - Theme.WINDOW_CLOSE_RESERVE - pad - bs
-    local btnY = titleY + math.max(0, math.floor((headerH - bs) / 2))
-    return plusX, btnY, bs
+    return win.x + 12, win.y + 46, 28
 end
 
 -- Authoritative placeholder type key; no string fallback (would drift).
@@ -559,6 +555,7 @@ end
 -- started elsewhere is held over us, and that press's ONRELEASE never routes here - starting
 -- a gesture from it strands the drag stuck-to-cursor. pressed-guard still blocks duplicate ONCLICK.
 function Editor:beginPress()
+    if Dialog.depth(self.overlayParent) > 0 then return end
     if self.pressed or not self.visible then return end
     self:syncContentOrigin()
     local mx, my = mousePos()
@@ -694,6 +691,15 @@ function Editor:beginWire(hit)
 end
 
 function Editor:update()
+    if Dialog.depth(self.overlayParent) > 0 then
+        self.pressed = false
+        self.mode = "idle"
+        self.wire = nil
+        self.dragNodeId = nil
+        self.colorDragPart = nil
+        self.palette.scrollDragging = false
+        return
+    end
     self.tick = self.tick + 1   -- advances even without a cursor, for double-click timing
     self:syncContentOrigin()
     -- Resting capture tracks live content rect while PrettyUI drags; skip while expanded.
@@ -726,6 +732,7 @@ function Editor:update()
 end
 
 function Editor:endPress()
+    if Dialog.depth(self.overlayParent) > 0 then return end
     if not self.pressed then return end
     self.pressed = false
 
@@ -821,7 +828,7 @@ end
 
 function Editor:openPaletteFromPlus()
     local gx, gy = self:viewCenterGraph()
-    -- Content-local: PLUS is on the title strip, so ly is typically slightly negative.
+    -- Place the palette below the Add alert node button.
     local plusX, plusY, bs = plusScreenPos(self.window)
     local lx = plusX - self.window.x
     local ly = plusY + bs - self.window.y
@@ -987,6 +994,7 @@ function Editor:openNodeModeDropdown(nodeId)
 end
 
 function Editor:onScroll(delta)
+    if Dialog.depth(self.overlayParent) > 0 then return end
     if delta == nil or delta == 0 then return end
     -- Palette open: wheel scrolls the list instead of zooming.
     if self.palette.open then
@@ -1020,7 +1028,8 @@ function Editor:applyZoomIndex(index)
     local rungs = View.Rungs()
     if index < 1 then index = 1 end
     if index > #rungs then index = #rungs end
-    local cx, cy = self.window.w * 0.5, self.window.h * 0.5
+    local vx, vy, vw, vh = self:viewportRect()
+    local cx, cy = vx + vw * 0.5, vy + vh * 0.5
     self.view:SetZoomAt(cx, cy, rungs[index])
     self:syncZoomSlider()
 end
@@ -1217,8 +1226,9 @@ function Editor:closeColorHexEditor()
     self.colorHexLocalW, self.colorHexLocalH = nil, nil
 end
 
--- Esc: color popup, then marker capture, then goBack. First match consumes the key.
+-- Esc dismisses the dialog, color popup, marker capture, or editor in that order.
 function Editor:onEscape()
+    if Dialog.dismissTop(self.overlayParent) then return end
     if self.colorPopup.open then
         self:closeColorPopup()
         return
@@ -1536,7 +1546,7 @@ function Editor:drawZoomTick()
     local n = #View.Rungs()
     local t = (View.RungIndex(1.0) - 1) / (n - 1)
     local x = math.floor(t * (w - 1) + 0.5) - 4
-    c:AddLine(x, 2, x, h - 2, 2, Theme.Vec4(Theme.COL_ZOOM_TICK))
+    c:AddLine(x, 2, x, h - 2, 1, Theme.Vec4(Theme.COL_ZOOM_TICK))
 end
 
 --- Visibility
@@ -1632,13 +1642,14 @@ function Editor:OnShellHide()
     self:positionCapture()
     dismissToolbarTooltip(self.plusButton)
     dismissToolbarTooltip(self.resetViewButton)
+    dismissToolbarTooltip(self.renameButton)
     dismissToolbarTooltip(self.backButton)
 end
 
 -- Default pan/zoom on Mount and each open (avoids irrecoverable off-screen pan).
 function Editor:resetView()
     self.view.panX = 0
-    self.view.panY = 0
+    self.view.panY = EDITOR_TOOLBAR_H
     self.view.zoom = 1.0
     self:syncZoomSlider()
 end
@@ -1662,6 +1673,9 @@ function Editor:SetVisible(v)
     hideToolbarButton(self.plusButton, not self.visible)
     hideToolbarButton(self.resetViewButton, not self.visible)
     hideToolbarButton(self.backButton, not self.visible)
+    hideToolbarButton(self.renameButton, not self.visible)
+    if self.alertNameLabel ~= nil then self.alertNameLabel.hidden = not self.visible end
+    if self.toolbarBackground ~= nil then self.toolbarBackground.hidden = not self.visible end
     if self.zoomSlider ~= nil then
         pcall(function() self.zoomSlider.hidden = not self.visible end)
     end
@@ -1692,45 +1706,37 @@ end
 
 -- Overlay widgets sit on the PrettyUI title strip (above titleDrag in z-order), not in
 -- content. self.window is the content rect: title origin is (-BORDER, -HEADER_H). The
--- right cluster stops at WINDOW_CLOSE_RESERVE so close still receives clicks.
+-- Toolbar controls live in the content area below the native title bar.
 function Editor:layoutToolbar()
     local win = self.window
-    local bs = TOOLBAR_BTN
-    local pad = TOOLBAR_PAD
-    local titleX, titleY, _, headerH = titleStrip(win)
-    local plusX, btnY = plusScreenPos(win)
+    local x, y, gap = win.x + 12, win.y + 8, 8
+    local backW = math.max(144, select(1, prettyui.SimpleButton.getSize("Back to alerts")))
+    local resetW = math.max(96, select(1, prettyui.SimpleButton.getSize("Reset view")))
+    local renameW = math.max(80, select(1, prettyui.SimpleButton.getSize("Rename")))
+    local right = win.x + win.w - 12
+    if self.toolbarBackground ~= nil then
+        self.toolbarBackground:SetPos(win.x, win.y)
+        self.toolbarBackground:SetSize(win.w, EDITOR_TOOLBAR_H)
+        self.toolbarBackground:Clear()
+        self.toolbarBackground:AddRectangle(0, 0, win.w, EDITOR_TOOLBAR_H, Theme.Vec4(Theme.COL_VIEWPORT_BG))
+    end
+    if self.backButton ~= nil then self.backButton.root:SetPos(x, y); self.backButton.root:SetSize(backW, 28) end
+    if self.renameButton ~= nil then self.renameButton.root:SetPos(right - renameW, y); self.renameButton.root:SetSize(renameW, 28) end
+    if self.alertNameLabel ~= nil then
+        self.alertNameLabel:SetPos(x + backW + 16, y)
+        self.alertNameLabel:SetSize(math.max(40, right - renameW - gap - (x + backW + 16)), 28)
+    end
+    local plusX, plusY = plusScreenPos(win)
+    if self.plusButton ~= nil then self.plusButton.root:SetPos(plusX, plusY) end
+    local resetX = right - resetW
+    if self.resetViewButton ~= nil then self.resetViewButton.root:SetPos(resetX, plusY); self.resetViewButton.root:SetSize(resetW, 28) end
     local sw, sh = Theme.ZOOM_SLIDER_W, Theme.ZOOM_SLIDER_H
-    local hashX = plusX - pad - bs
-    local sliderX = hashX - pad - sw
-    local sliderY = titleY + math.max(0, math.floor((headerH - sh) / 2))
+    local sliderX, sliderY = resetX - 16 - sw, plusY + 2
     if self.zoomSlider ~= nil then
-        pcall(function()
-            self.zoomSlider:SetSize(sw, sh)
-            if self.zoomSlider.height ~= nil and self.zoomSlider.height > 0 then
-                sh = self.zoomSlider.height
-                sliderY = titleY + math.max(0, math.floor((headerH - sh) / 2))
-            end
-            self.zoomSlider:SetPos(sliderX, sliderY)
-            self.zoomSlider:SetSize(sw, sh)
-        end)
-    end
-    if self.plusButton ~= nil then
-        self.plusButton.root:SetPos(plusX, btnY)
-        self.plusButton.root:SetSize(bs, bs)
-    end
-    if self.resetViewButton ~= nil then
-        self.resetViewButton.root:SetPos(hashX, btnY)
-        self.resetViewButton.root:SetSize(bs, bs)
+        self.zoomSlider:SetPos(sliderX, sliderY); self.zoomSlider:SetSize(sw, sh)
     end
     if self.zoomTickCanvas ~= nil then
-        pcall(function()
-            self.zoomTickCanvas:SetPos(sliderX, sliderY)
-            self.zoomTickCanvas:SetSize(sw, sh)
-        end)
-    end
-    if self.backButton ~= nil then
-        self.backButton.root:SetPos(titleX + pad, btnY)
-        self.backButton.root:SetSize(bs, bs)
+        self.zoomTickCanvas:SetPos(sliderX, sliderY); self.zoomTickCanvas:SetSize(sw, sh)
     end
 end
 
@@ -1825,25 +1831,28 @@ function Editor:mountToolbar(overlayParent)
         self.zoomTickCanvas = tick
     end
 
-    local hash = prettyui.SpriteButton.new(overlayParent, "GRID_LAYOUT", function()
+    self.toolbarBackground = ui.Canvas.new(overlayParent)
+    self.toolbarBackground.clickthrough = false
+    self.alertNameLabel = ui.Text.new(overlayParent)
+    self.alertNameLabel.content = self.alertName or "New Alert"
+    self.alertNameLabel.font = id.Font.MUSEO_SANS_15PT_REGULAR
+    self.alertNameLabel.rgba = 0xE7D7B0FF
+    self.alertNameLabel.alignHorizontal = ui.AlignMode.TOPLEFT
+    self.alertNameLabel.alignVertical = ui.AlignMode.CENTRE
+    self.alertNameLabel.maxLines = 1
+    self.alertNameLabel.clickthrough = true
+    self.resetViewButton = prettyui.SimpleButton.new(overlayParent, "Reset view", function()
         self:onResetView()
-    end, { tooltip = "Reset view" })
-    hash:SetHoverCursor(id.Cursor.CURSOR_GOTO)
-    self.resetViewButton = hash
-
-    -- Unmanaged SpriteButton.new on the overlay is the #105 canary: no pcall, same
-    -- wrapper-plus-.root pattern as `#`. Host onBack stays pcall-wrapped in goBack.
-    local plus = prettyui.SpriteButton.new(overlayParent, "PLUS", function()
+    end, { height = 28, tooltip = "Reset zoom and position" })
+    self.plusButton = prettyui.FancyButton.new(overlayParent, "+ Add alert node", function()
         self:openPaletteFromPlus()
-    end, { size = TOOLBAR_BTN, tooltip = "Add node" })
-    plus:SetHoverCursor(id.Cursor.CURSOR_GOTO)
-    self.plusButton = plus
-
-    local back = prettyui.SpriteButton.new(overlayParent, "BACK", function()
+    end, { variant = "positive", tooltip = "Add a trigger or action to this alert" })
+    self.backButton = prettyui.SimpleButton.new(overlayParent, "Back to alerts", function()
         self:goBack()
-    end, { size = TOOLBAR_BTN, tooltip = "Back" })
-    back:SetHoverCursor(id.Cursor.CURSOR_GOTO)
-    self.backButton = back
+    end, { height = 28, tooltip = "Return to your alerts" })
+    self.renameButton = prettyui.SimpleButton.new(overlayParent, "Rename", function()
+        if self.onRename ~= nil then self.onRename() end
+    end, { height = 28, tooltip = "Rename this alert" })
 
     self:layoutToolbar()
 end
@@ -1858,6 +1867,9 @@ function Editor:goBack()
 end
 
 function Editor:Unmount()
+    if self.renameButton ~= nil then self.renameButton:Destroy(); self.renameButton = nil end
+    if self.alertNameLabel ~= nil then self.alertNameLabel:Destroy(); self.alertNameLabel = nil end
+    if self.toolbarBackground ~= nil then self.toolbarBackground:Destroy(); self.toolbarBackground = nil end
     self:closeControlEditor()
     self:closeColorPopup()
     InvViewer.DestroyAll(self)

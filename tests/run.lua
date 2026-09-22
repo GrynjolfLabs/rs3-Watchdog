@@ -71,5 +71,7 @@ require("test_custom_sound")
 require("test_alert_toggle")
 require("test_view")
 require("test_graph_editor")
+require("test_ui_layout")
+require("test_window_chrome")
 
 os.exit(luaunit.LuaUnit.run())

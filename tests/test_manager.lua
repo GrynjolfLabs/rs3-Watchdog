@@ -208,7 +208,7 @@ function TestManager:testRowLabelGroupShowsChevronAndCount()
     local open = mgr:RowLabel({ id = 1, name = "PvM", kind = "group", depth = 0, childCount = 3, expanded = true })
     luaunit.assertStrContains(open, "v")
     luaunit.assertStrContains(open, "PvM")
-    luaunit.assertStrContains(open, "(3)")
+    luaunit.assertStrContains(open, "(3 items)")
     local closed = mgr:RowLabel({ id = 1, name = "PvM", kind = "group", depth = 0, childCount = 3, expanded = false })
     luaunit.assertStrContains(closed, ">")
 end
@@ -405,7 +405,7 @@ function TestManager:testDeleteConfirmBodyDisclosesDescendantCount()
     luaunit.assertEquals(mgr:_descendantCount(1), 3) -- a + inner + b
     luaunit.assertEquals(
         mgr:_deleteConfirmBody(1),
-        'Delete "g" and 3 descendants? This cannot be undone.'
+        'Delete "g" and 3 items inside it? This cannot be undone.'
     )
     luaunit.assertEquals(mgr:_deleteConfirmBody(5), 'Delete "leaf"? This cannot be undone.')
     luaunit.assertEquals(mgr:_deleteConfirmBody(6), 'Delete "empty"? This cannot be undone.')
@@ -424,7 +424,7 @@ function TestManager:testBulkDeleteConfirmBodyDisclosesRideAlongCount()
     mgr:ToggleSelection(5, false)
     luaunit.assertEquals(
         mgr:_bulkDeleteConfirmBody(),
-        "Delete 2 selected? This also deletes 3 descendants."
+        "Delete 2 selected? This also deletes 3 contained items."
     )
 end
 

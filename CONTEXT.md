@@ -234,15 +234,19 @@ the Alert Manager wayfinder map (#73); each term points at the ticket that fixed
 
 **Alert Manager**:
 The single management surface the F8 keybind and the LibPluginMenu button open (`ui/manager.lua`):
-a **tab bar** of Scopes over a tree of Entries, each row carrying enable / select / ↑↓ / Lift /
-name / pencil / export / trash. Double-clicking an alert row navigates into the Editor; the two are
-separate surfaces, mounted once, with at most one visible at a time (#76, #78, #80). #90 landed the
-scope tabs, tree render (icon + name, group chevron + child count, expand/collapse),
-double-click-to-open, and the nav owner; #91 adds the per-row enable / rename / delete ops and the
-per-tab + Alert / + Group actions. Sibling reorder (↑↓) and Lift are per-row buttons; drag nest /
-cross-scope remains #92 — [`docs/alert-manager-prettyui.md`](docs/alert-manager-prettyui.md).
-The tree/scope/expand/mutation logic is pure and headless-tested; the mount/render half is
-client-only, the same split the Editor uses.
+a **tab bar** of Scopes over a tree of Entries. “All characters” and the character tab explain
+scope through tooltips. Clicking an alert name opens the Editor; clicking a group expands it.
+Rows have centered enable/select checkboxes, left-aligned names, and rename/export/delete actions.
+Move exposes sibling reorder (↑↓) and Lift controls; Move and bulk selection are mutually exclusive.
+Selected entries expose Clear selection, Add to new group, Move to the other scope, Export, and Delete.
+The two surfaces are mounted once, with at most one visible at a time (#76, #78, #80).
+
+The Editor toolbar shows Back to alerts, the alert name, and Rename above Add alert node and
+zoom/reset controls. Its 84px height is excluded from the Viewport, including zoom and node-placement
+centering. Both surfaces share a modal stack above input capture. The native title bar remains
+draggable; a bottom-right grip resizes the window and Maximize/Restore preserves its prior bounds.
+The tree/scope/expand/mutation logic is headless-tested; mocked UI checks cover layout and input
+stacking, while actual appearance and client event delivery still require in-game verification.
 _Avoid_: Alert list, manager window, dashboard; the Editor (that is the Canvas graph surface)
 
 **Dialog**:

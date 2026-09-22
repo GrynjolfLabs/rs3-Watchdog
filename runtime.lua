@@ -379,10 +379,11 @@ end
 
 ---@param id integer
 ---@param name string
+---@param bucketKey string|nil
 ---@return boolean
-function Runtime:RenameAlert(id, name)
+function Runtime:RenameAlert(id, name, bucketKey)
     for _, alert in ipairs(self.alerts) do
-        if alert.id == id then
+        if alert.id == id and (bucketKey == nil or alert.bucketKey == bucketKey) then
             alert.name = name
             self:_rebuildNameIndex()
             return true

@@ -13,6 +13,7 @@ local Export = require("export")
 local Runtime = require("runtime")
 local ToastStack = require("toast")
 local Theme = require("ui/theme")
+local Dialog = require("ui/dialog")
 
 local function RegisterToPluginMenu()
     LibPluginMenu.Unregister("watchdog")
@@ -235,7 +236,7 @@ end
 
 ---@return Watchdog.ManagerScope[]
 local function getScopes()
-    local scopes = { { key = "global", label = "Global", doc = document } }
+    local scopes = { { key = "global", label = "All characters", doc = document } }
     local name, key = runtime:GetActiveCharacter()
     if key ~= nil and charScope ~= nil and charScope.key == key then
         scopes[#scopes + 1] = { key = key, label = name or charScope.displayName, doc = charScope.doc }
@@ -258,7 +259,8 @@ local manager
 local function navOpenAlert(scopeKey, entryId)
     local a = resolveAlert(scopeKey, entryId)
     if a == nil then return end
-    editor:BindEntry(entryId, a.graph, a.layout)
+    local entry = Store.FindById(a.doc, entryId)
+    editor:BindEntry(entryId, a.graph, a.layout, entry.name)
     boundScope = { doc = a.doc, key = a.key }
     boundLastEncoded = Store.Encode(a.doc)
     if mux ~= nil and editorSurface ~= nil then
@@ -339,17 +341,52 @@ end
 local function onRename(scopeKey, id, name)
     local doc, key, list = scopeBucket(scopeKey)
     if doc == nil then return end
-    if not Store.SetName(doc, id, name) then return end
-    Store.SaveTo(key, doc)
+    local entryBefore = Store.FindById(doc, id)
+    local oldName = entryBefore and entryBefore.name
+    if not Store.SetName(doc, id, name) then return false end
+    if not Store.SaveTo(key, doc) then
+        Store.SetName(doc, id, oldName)
+        return false
+    end
     local entry = Store.FindById(doc, id)
     if entry ~= nil and entry.kind == "alert" then
-        runtime:RenameAlert(id, name)
+        runtime:RenameAlert(id, name, key)
         if list ~= nil then
             for _, a in ipairs(list) do
                 if a.id == id then a.name = name end
             end
         end
     end
+    if editor.boundId == id and boundScope ~= nil and boundScope.key == key then
+        editor.alertName = name
+        if editor.alertNameLabel ~= nil then editor.alertNameLabel.content = name end
+    end
+    return true
+end
+editor.onRename = function()
+    if boundScope == nil or editor.boundId == nil then return end
+    local scopeKey, entryId = boundScope.key, editor.boundId
+    local field, feedback
+    Dialog.mount(mux:Overlay(), {
+        title = "Rename alert", width = 380, height = 200,
+        content = function(win)
+            win:AddText("Alert name")
+            field = win:AddTextField({ text = editor.alertName, maxLength = 80, height = 30 })
+            feedback = win:AddText("")
+        end,
+        actions = {
+            { label = "Cancel" },
+            { label = "Save", variant = "positive", onClick = function()
+                local name = field:GetText():match("^%s*(.-)%s*$")
+                if name == "" then feedback.content = "Enter an alert name."; return false end
+                if not onRename(scopeKey, entryId, name) then
+                    feedback.content = "Could not save the name. Try again."
+                    return false
+                end
+                return true
+            end },
+        },
+    })
 end
 
 ---@param scopeKey string
@@ -673,10 +710,9 @@ manager = Manager.new({
     onBulkMove = onBulkMove,
     onExportEntries = onExportEntries,
     onImportJson = onImportJson,
-    -- Same owned Layer the main shell Window uses - dialog dies with mux.rootLayer on
-    -- Stop / reload, instead of orphaning under the game area.
+    -- Share the editor's modal stack so every dialog blocks the window controls.
     windowParent = function()
-        return mux ~= nil and mux.rootLayer or nil
+        return mux ~= nil and mux:Overlay() or nil
     end,
 })
 
@@ -693,8 +729,8 @@ mux = Multiplexer.new({
     yAnchor = 0.5,
     width = Theme.WINDOW_W,
     height = Theme.WINDOW_H,
-    minWidth = 320,
-    minHeight = 220,
+    minWidth = 720,
+    minHeight = 320,
     scrollable = false,
     onHide = function()
         pcall(function() manager:DismissDialogs() end)
@@ -874,6 +910,7 @@ local function onDraw()
         -- Object-marker overlay is instruction-only; a dim would block MiniMenu.
         pcall(function() runtime.objectMarkerCapture:Draw(runtime.effects.canvas) end)
     end
+    if mux ~= nil then mux:SyncChrome() end
 end
 
 --- Public API + lifecycle ---------------------------------------------------------------

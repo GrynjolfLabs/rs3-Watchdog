@@ -39,7 +39,7 @@ Manager.__index = Manager
 
 ---@class Watchdog.ManagerOpts
 ---@field scopes fun(): Watchdog.ManagerScope[]              # ordered scopes (Global first, character second)
----@field onOpenAlert fun(scopeKey: string, id: integer)    # nav callback for a double-clicked alert row
+---@field onOpenAlert fun(scopeKey: string, id: integer)    # nav callback for an alert row click
 ---@field onToggleEnabled fun(scopeKey: string, id: integer)|nil
 ---@field onRename fun(scopeKey: string, id: integer, name: string)|nil
 ---@field onDelete fun(scopeKey: string, id: integer)|nil
@@ -74,6 +74,7 @@ function Manager.new(opts)
         onImportJson = opts and opts.onImportJson,
         windowParent = opts and opts.windowParent,
         activeScope = nil,          -- nil ⇒ first scope (Global)
+        moveMode = false,
         expanded = {},              -- expanded[scopeKey][id]; absent ⇒ expanded
         expandVersion = 0,
         mutateVersion = 0,
@@ -81,9 +82,6 @@ function Manager.new(opts)
         selectVersion = 0,
         lastSelectId = nil,         -- Shift-click range anchor over VisibleRows()
         visible = false,
-        tick = 0,
-        lastRowId = nil,
-        lastRowTick = -1000,
         window = {
             w = Theme.WINDOW_W, h = Theme.WINDOW_H,
         },
@@ -95,7 +93,7 @@ function Manager.new(opts)
         treeTop = 0,                -- content-local Y (rename AddTextField coords)
         bulkBarButtons = {},
         toolbarButtons = {},
-        rowSpriteButtons = {},      -- PrettyUI SpriteButtons (tooltips parent to overlay)
+        rowSpriteButtons = {},      -- PrettyUI row controls (tooltips parent to overlay)
         rowTooltipHosts = {},       -- native row Panels with a PrettyUI tooltip context
         lastSignature = nil,
         renameField = nil,
@@ -107,6 +105,10 @@ end
 
 --- Pure logic: scopes ---------------------------------------------------------------------
 
+function Manager:ToggleMoveMode()
+    self.moveMode = not self.moveMode
+    self:ClearSelection()
+end
 ---@return Watchdog.ManagerScope[]
 function Manager:ScopeList()
     local ok, scopes = pcall(self.scopesProvider)
@@ -133,11 +135,11 @@ function Manager:ActiveScopeKey()
     return scope and scope.key or nil
 end
 
--- Clears double-click pairing and selection (the visible list is replaced).
+-- Clear move mode and selection when switching scopes.
 ---@param key string
 function Manager:SetActiveScope(key)
+    self.moveMode = false
     self.activeScope = key
-    self.lastRowId = nil
     self:ClearSelection()
 end
 
@@ -214,7 +216,7 @@ end
 ---@param scopeKey string
 ---@param depth integer
 ---@param out Watchdog.ManagerRow[]
-local function flatten(self, entries, scopeKey, depth, out)
+local function flatten(self, entries, scopeKey, depth, out, parentEnabled)
     for _, e in ipairs(entries or {}) do
         local isGroup = e.kind == "group"
         local expanded = isGroup and self:IsExpanded(scopeKey, e.id) or false
@@ -226,9 +228,10 @@ local function flatten(self, entries, scopeKey, depth, out)
             childCount = isGroup and #(e.children or {}) or nil,
             expanded = expanded,
             enabled = e.enabled ~= false,
+            pausedByGroup = parentEnabled == false,
         }
         if isGroup and expanded then
-            flatten(self, e.children, scopeKey, depth + 1, out)
+            flatten(self, e.children, scopeKey, depth + 1, out, parentEnabled ~= false and e.enabled ~= false)
         end
     end
     return out
@@ -421,6 +424,7 @@ end
 ---@param id integer
 ---@param shift boolean|nil
 function Manager:ToggleSelection(id, shift)
+    self.moveMode = false
     if shift and self.lastSelectId ~= nil then
         local rows = self:VisibleRows()
         local a, b
@@ -542,7 +546,7 @@ function Manager:OpenImport()
     local scopeKey = self:ActiveScopeKey()
     if scopeKey == nil or self.onImportJson == nil then return end
     ImportExport.mountImport(parent, {
-        message = "Paste an export envelope, then Import.",
+        message = "Paste the alert code you copied from Watchdog.",
         maxLength = Export.MAX_BYTES,
         onImport = function(text)
             local okCall, ok, report = pcall(function()
@@ -593,26 +597,12 @@ end
 function Manager:RowLabel(row)
     if row.kind == "group" then
         local chevron = row.expanded and "v" or ">"
-        return chevron .. " | " .. row.name .. " (" .. tostring(row.childCount or 0) .. ")"
+        return chevron .. "   " .. row.name .. "  (" .. tostring(row.childCount or 0) .. " items)"
     end
-    return row.name
+    return row.name .. (row.pausedByGroup and "  — paused by group" or "")
 end
 
 --- Client view: mount / render (client-only, pcall-guarded) -------------------------------
-
-local function safeButtonStyle()
-    if id ~= nil and id.StyleSheet ~= nil and id.StyleSheet.BUTTON_DEFAULT ~= nil then
-        return id.StyleSheet.BUTTON_DEFAULT
-    end
-    return nil
-end
-
-local function safeCheckStyle()
-    if id ~= nil and id.StyleSheet ~= nil and id.StyleSheet.CHECKBOX_DEFAULT ~= nil then
-        return id.StyleSheet.CHECKBOX_DEFAULT
-    end
-    return nil
-end
 
 ---@param parent ui.ComponentCollection|nil
 ---@return number, number
@@ -713,7 +703,10 @@ function Manager:_releaseRowTooltips()
     self:_hideRowTooltips()
     if prettyui ~= nil and prettyui.Tooltip ~= nil then
         for _, btn in ipairs(self.rowSpriteButtons) do
-            pcall(function() prettyui.Tooltip.unbind(btn) end)
+            pcall(function()
+                if btn.kind == "checkbox" then btn:Destroy()
+                else prettyui.Tooltip.unbind(btn) end
+            end)
         end
         for _, host in ipairs(self.rowTooltipHosts) do
             pcall(function() prettyui.Tooltip.unregisterContext(host) end)
@@ -724,7 +717,7 @@ function Manager:_releaseRowTooltips()
 end
 
 -- Native row Panels are not PrettyUI content, so SpriteButton tooltips would clip inside
--- the 22px row. Register a context that parents tips to the Window overlay and maps
+-- the row. Register a context that parents tips to the Window overlay and maps
 -- sprite coords through tree + row.
 ---@param rowPanel ui.ComponentCollection
 function Manager:_bindRowTooltipContext(rowPanel)
@@ -797,6 +790,8 @@ function Manager:_ensureTabs()
         entries[#entries + 1] = {
             text = scope.label or scope.key,
             value = scope.key,
+            tooltip = scope.key == "global" and "Alerts will run for all characters"
+                or "Alerts will only run for this account",
         }
     end
     local activeIndex = self:_activeScopeIndex()
@@ -872,16 +867,14 @@ end
 ---@return number nameW
 ---@return number moveW
 ---@return number actionsW
-local function managerColumnWidths(rowW, depth)
-    local baseNameW = math.max(40, rowW - Theme.MANAGER_ENABLE_W - Theme.MANAGER_SELECT_W - Theme.MANAGER_REORDER_COUNT * Theme.MANAGER_REORDER_W
-        - Theme.MANAGER_ACT_COUNT * Theme.MANAGER_ACT_W - (Theme.MANAGER_ACT_COUNT + Theme.MANAGER_REORDER_COUNT + 2) * Theme.MANAGER_ROW_GAP)
-    local indent = (depth or 0) * Theme.MANAGER_ROW_INDENT
-    local nameW = math.max(40, baseNameW - indent)
-    local moveW = Theme.MANAGER_REORDER_COUNT * Theme.MANAGER_REORDER_W
-        + (Theme.MANAGER_REORDER_COUNT - 1) * Theme.MANAGER_ROW_GAP
-    -- Select checkbox lives in the Actions cluster (select + pencil + export + trash).
-    local actionsW = Theme.MANAGER_SELECT_W + Theme.MANAGER_ACT_COUNT * Theme.MANAGER_ACT_W
-        + Theme.MANAGER_ACT_COUNT * Theme.MANAGER_ROW_GAP
+local function managerColumnWidths(rowW, depth, moving)
+    local count = moving and Theme.MANAGER_REORDER_COUNT or 0
+    local baseNameW = math.max(40, rowW - Theme.MANAGER_ENABLE_W - Theme.MANAGER_SELECT_W
+        - count * Theme.MANAGER_REORDER_W - Theme.MANAGER_ACT_COUNT * Theme.MANAGER_ACT_W
+        - (Theme.MANAGER_ACT_COUNT + count + 2) * Theme.MANAGER_ROW_GAP)
+    local nameW = math.max(40, baseNameW - (depth or 0) * Theme.MANAGER_ROW_INDENT)
+    local moveW = count > 0 and count * Theme.MANAGER_REORDER_W + (count - 1) * Theme.MANAGER_ROW_GAP or 0
+    local actionsW = Theme.MANAGER_ACT_COUNT * Theme.MANAGER_ACT_W + (Theme.MANAGER_ACT_COUNT - 1) * Theme.MANAGER_ROW_GAP
     return baseNameW, nameW, moveW, actionsW
 end
 
@@ -910,40 +903,11 @@ local function mountHeaderCell(parent, w, h, text, center)
         label.rgb = rgb
         label.rgba = rgb
         if ui.AlignMode ~= nil then
-            label.alignHorizontal = center and ui.AlignMode.CENTRE or ui.AlignMode.LEFT
+            label.alignHorizontal = center and ui.AlignMode.CENTRE or ui.AlignMode.TOPLEFT
             label.alignVertical = ui.AlignMode.CENTRE
         end
         label:MoveToFront()
     end)
-end
-
----@param parent ui.ComponentCollection
----@param x number
----@param y number
----@param w number
----@param h number
----@param label string
----@param onPress fun()
----@param enabled boolean|nil
----@return ui.Button|nil
-local function mountButton(parent, x, y, w, h, label, onPress, enabled)
-    local button
-    local okb = pcall(function() button = ui.Button.new(parent) end)
-    if not okb or button == nil then return nil end
-    pcall(function() button.stylesheetID = safeButtonStyle() end)
-    button.clickthrough = false
-    button:SetPos(x, y)
-    button:SetSize(w, h)
-    pcall(function() button.text.content = label end)
-    local isEnabled = enabled ~= false
-    pcall(function() button.enabled = isEnabled end)
-    button:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
-        if not isEnabled then return true end
-        onPress()
-        return true
-    end)
-    pcall(function() button:MoveToFront() end)
-    return button
 end
 
 ---@param parent ui.ComponentCollection
@@ -961,73 +925,31 @@ local function mountRowSprite(parent, spriteName, onPress, size, disabled, toolt
     return btn
 end
 
+-- Keep the 14px PrettyUI checkbox centered inside a 28px click target.
 ---@param parent ui.ComponentCollection
----@param w number
----@param h number
-local function mountClickthroughSpacer(parent, w, h)
-    if w <= 0 then return end
-    pcall(function()
-        local spacer = ui.Panel.new(parent)
-        spacer.isVertical = false
-        spacer.spacing = 0
-        spacer.clickthrough = true
-        spacer:SetSize(w, h)
-    end)
-end
-
--- Enable lives in a wide header cell; wrap the glyph in spacers so it sits centred.
----@param parent ui.ComponentCollection
+---@param cellW number
 ---@param checked boolean
 ---@param onPress fun()
-local function mountEnableToggle(parent, checked, onPress)
-    local cellW, cellH = Theme.MANAGER_ENABLE_W, Theme.MANAGER_ROW_H
-    local box = cellH
-    local cell
-    pcall(function()
-        cell = ui.Panel.new(parent)
-        cell.isVertical = false
-        cell.spacing = 0
-        cell.clickthrough = true
-        cell:SetSize(cellW, cellH)
-    end)
-    local host = cell or parent
-    local side = 0
-    if cell ~= nil then
-        side = math.floor((cellW - box) / 2)
-        mountClickthroughSpacer(cell, side, cellH)
-    else
-        box = cellW
-    end
-
-    local enableMounted = false
-    if ui.Check ~= nil then
-        local check
-        local okc = pcall(function() check = ui.Check.new(host) end)
-        if okc and check ~= nil then
-            pcall(function()
-                check.stylesheetID = safeCheckStyle()
-                check:SetSize(box, cellH)
-                check.buttonSize = math.min(box, cellH)
-                check.value = checked and true or false
-                check.label = ""
-                if ui.CheckAlignMode ~= nil then
-                    check.alignment = ui.CheckAlignMode.LEFT
-                end
-                check:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
-                    onPress()
-                    return true
-                end)
-            end)
-            enableMounted = true
-        end
-    end
-    if not enableMounted then
-        local mark = checked and "[x]" or "[ ]"
-        mountButton(host, 0, 0, box, cellH, mark, onPress)
-    end
-    if cell ~= nil then
-        mountClickthroughSpacer(cell, cellW - box - side, cellH)
-    end
+local function mountCheckbox(parent, cellW, checked, onPress)
+    local cellH = Theme.MANAGER_ROW_H
+    local cell = ui.Layer.new(parent)
+    cell:SetSize(cellW, cellH)
+    cell.clickthrough = true
+    local hitSize = 28
+    local check = prettyui.CheckboxButton.new(cell, {
+        { text = "", value = "checked", selected = checked == true },
+    }, {
+        width = hitSize,
+        x = math.floor((cellW - hitSize) / 2),
+        y = math.floor((cellH - hitSize) / 2),
+        onChange = onPress,
+    })
+    check.root:SetSize(hitSize, hitSize)
+    local item = check.items[1]
+    item.row:SetSize(hitSize, hitSize)
+    item.box:SetPos(7, 7)
+    item.label.hidden = true
+    return check
 end
 
 local SUBMIT_CAUSES = {
@@ -1148,7 +1070,7 @@ function Manager:_deleteConfirmBody(id)
     local name = entry and entry.name or ""
     local n = self:_descendantCount(id)
     if n > 0 then
-        local noun = n == 1 and "descendant" or "descendants"
+        local noun = n == 1 and "item inside it" or "items inside it"
         return string.format('Delete "%s" and %d %s? This cannot be undone.', name, n, noun)
     end
     return string.format('Delete "%s"? This cannot be undone.', name)
@@ -1171,8 +1093,7 @@ function Manager:_bulkDeleteConfirmBody(ids)
     local body = string.format("Delete %d selected?", #ids)
     local n = self:_bulkRideAlongCount(ids)
     if n > 0 then
-        local noun = n == 1 and "descendant" or "descendants"
-        body = body .. string.format(" This also deletes %d %s.", n, noun)
+        body = body .. string.format(" This also deletes %d %s.", n, n == 1 and "contained item" or "contained items")
     end
     return body
 end
@@ -1197,84 +1118,65 @@ end
 
 -- Tabs has no trailing-actions API (only TabPage is a ContentMethods host) - AddFancyButton + abs coords.
 function Manager:_mountToolbar()
-    if self.layoutHost == nil or self.layoutHost.AddFancyButton == nil then return end
-    if prettyui == nil or prettyui.FancyButton == nil then return end
-    local alertW, groupW, importW, exportW = 75, 75, 70, 70
-    pcall(function()
-        alertW = select(1, prettyui.FancyButton.getSize("+ Alert", { variant = "positive" }))
-        groupW = select(1, prettyui.FancyButton.getSize("+ Group", { variant = "neutral" }))
-        importW = select(1, prettyui.FancyButton.getSize("Import", { variant = "neutral" }))
-        exportW = select(1, prettyui.FancyButton.getSize("Export", { variant = "neutral" }))
-    end)
-    local y = math.max(0, math.floor((Theme.MANAGER_TAB_BASELINE - Theme.MANAGER_TOOLBAR_H) / 2))
-    local group, alert, importBtn, exportBtn
-    local xGroup = -Theme.MANAGER_TOOLBAR_PAD - groupW
-    local xAlert = xGroup - Theme.MANAGER_TOOLBAR_GAP - alertW
-    local xExport = xAlert - Theme.MANAGER_TOOLBAR_GAP - exportW
-    local xImport = xExport - Theme.MANAGER_TOOLBAR_GAP - importW
-    pcall(function()
-        group = self.layoutHost:AddFancyButton("+ Group", function()
-            local id = self:CreateGroup()
-            if type(id) == "number" then self.pendingRenameId = id end
-            self:_rebuild()
-        end, {
-            x = xGroup,
-            y = y,
-            xAnchor = 1.0,
-            variant = "neutral",
-        })
-        alert = self.layoutHost:AddFancyButton("+ Alert", function()
-            self:CreateAlert()
-            self:_rebuild()
-        end, {
-            x = xAlert,
-            y = y,
-            xAnchor = 1.0,
-            variant = "positive",
-        })
-        exportBtn = self.layoutHost:AddFancyButton("Export", function()
-            self:ExportScope()
-        end, {
-            x = xExport,
-            y = y,
-            xAnchor = 1.0,
-            variant = "neutral",
-        })
-        importBtn = self.layoutHost:AddFancyButton("Import", function()
-            self:OpenImport()
-        end, {
-            x = xImport,
-            y = y,
-            xAnchor = 1.0,
-            variant = "neutral",
-        })
-    end)
-    if importBtn ~= nil then self.toolbarButtons[#self.toolbarButtons + 1] = importBtn end
-    if exportBtn ~= nil then self.toolbarButtons[#self.toolbarButtons + 1] = exportBtn end
-    if alert ~= nil then self.toolbarButtons[#self.toolbarButtons + 1] = alert end
-    if group ~= nil then self.toolbarButtons[#self.toolbarButtons + 1] = group end
+    local y = Theme.MANAGER_TAB_BASELINE + 8
+    local gap = Theme.MANAGER_TOOLBAR_GAP
+    local function add(text, x, action, primary, width)
+        local options = { x = x, y = y, width = width, height = 28,
+            variant = primary and "positive" or "neutral" }
+        local button
+        if primary then
+            button = self.layoutHost:AddFancyButton(text, action, options)
+            button.root:SetSize(button.root.width, options.height)
+            button.left:SetSize(25, options.height)
+            button.middle.isTiling = false
+            button.middle:SetSize(-50, options.height, 1.0)
+            button.right:SetSize(25, options.height)
+            button.label:SetSize(-50, options.height, 1.0)
+        else
+            button = self.layoutHost:AddSimpleButton(text, action, options)
+        end
+        self.toolbarButtons[#self.toolbarButtons + 1] = button
+        return button
+    end
+    local x = Theme.MANAGER_PAGE_PAD
+    local createW = select(1, prettyui.FancyButton.getSize("+ New alert", { variant = "positive" }))
+    add("+ New alert", x, function() self:CreateAlert(); self:_rebuild() end, true, createW)
+    add("+ New group", x + createW + gap, function()
+        local id = self:CreateGroup()
+        if type(id) == "number" then self.pendingRenameId = id end
+        self:_rebuild()
+    end, false, 112)
+    if not self:HasSelection() then
+        local right = self.window.w - Theme.MANAGER_PAGE_PAD
+        add("Export", right - 76, function() self:ExportScope() end, false, 76)
+        add("Import", right - 160, function() self:OpenImport() end, false, 76)
+        local move = add(self.moveMode and "Done moving" or "Move", right - 280, function()
+            self:ToggleMoveMode(); self:_rebuild()
+        end, false, 112)
+        move:SetActive(self.moveMode)
+    end
 end
 
 function Manager:_mountBulkBar(y)
     if not self:HasSelection() then return end
-    if self.layoutHost == nil or self.layoutHost.AddFancyButton == nil then return end
-    if prettyui == nil or prettyui.FancyButton == nil then return end
     local ids = self:SelectedIds()
+    local startY = y
     local x = 0
     local gap = Theme.MANAGER_TOOLBAR_GAP
 
-    local function addFancy(label, variant, onPress)
+    local function addButton(label, onPress)
         local btn
-        local w = 80
+        local measuredW = select(1, prettyui.SimpleButton.getSize(label))
+        local w = math.max(70, measuredW + 16)
+        if x > 0 and x + w > self.window.w - 2 * Theme.MANAGER_PAGE_PAD then
+            x = 0
+            y = y + Theme.MANAGER_BULK_BAR_H + 4
+        end
         pcall(function()
-            w = select(1, prettyui.FancyButton.getSize(label, { variant = variant, inline = true }))
-        end)
-        pcall(function()
-            btn = self.layoutHost:AddFancyButton(label, onPress, {
+            btn = self.layoutHost:AddSimpleButton(label, onPress, {
                 x = Theme.MANAGER_PAGE_PAD + x,
                 y = y,
-                variant = variant,
-                inline = true,
+                width = w, height = 28,
             })
         end)
         if btn ~= nil then
@@ -1283,20 +1185,8 @@ function Manager:_mountBulkBar(y)
         end
     end
 
-    addFancy("Delete", "negative", function()
-        self:_openConfirm({
-            title = DELETE_CONFIRM_TITLE,
-            confirmLabel = DELETE_CONFIRM_LABEL,
-            confirmVariant = 'negative',
-            body = self:_bulkDeleteConfirmBody(ids),
-            onConfirm = function()
-                self:BulkDelete(ids)
-                self:_rebuild()
-            end,
-        })
-    end)
-
-    addFancy("New group", "positive", function()
+    addButton("Clear selection (" .. #ids .. ")", function() self:ClearSelection(); self:_rebuild() end)
+    addButton("Add to new group", function()
         local newId = self:BulkNewGroup(ids)
         if type(newId) == "number" then self.pendingRenameId = newId end
         self:_rebuild()
@@ -1310,15 +1200,28 @@ function Manager:_mountBulkBar(y)
     end
     if other ~= nil then
         local moveLabel = "Move to " .. (other.label or other.key)
-        addFancy(moveLabel, "neutral", function()
+        addButton(moveLabel, function()
             self:BulkMove(other.key, ids)
             self:_rebuild()
         end)
     end
 
-    addFancy("Export", "neutral", function()
+    addButton("Export", function()
         self:BulkExport(ids)
     end)
+    addButton("Delete", function()
+        self:_openConfirm({
+            title = DELETE_CONFIRM_TITLE,
+            confirmLabel = DELETE_CONFIRM_LABEL,
+            confirmVariant = 'negative',
+            body = self:_bulkDeleteConfirmBody(ids),
+            onConfirm = function()
+                self:BulkDelete(ids)
+                self:_rebuild()
+            end,
+        })
+    end)
+    return y - startY + Theme.MANAGER_BULK_BAR_H
 end
 
 function Manager:_rebuild()
@@ -1340,8 +1243,8 @@ function Manager:_rebuild()
     local bulkY = Theme.MANAGER_TREE_TOP
     local treeTop = Theme.MANAGER_TREE_TOP
     if hasSel then
-        self:_mountBulkBar(bulkY)
-        treeTop = Theme.MANAGER_TREE_TOP + Theme.MANAGER_BULK_BAR_H + 4
+        local bulkHeight = self:_mountBulkBar(bulkY)
+        treeTop = Theme.MANAGER_TREE_TOP + bulkHeight + 4
     end
     self.treeTop = treeTop
 
@@ -1366,8 +1269,8 @@ function Manager:_rebuild()
 
     local rows = self:VisibleRows()
     local treeParent = self.treePanel
-    -- PrettyUI name/reorder on the native row; enable + Actions-cluster select stay ui.Check.
-    local baseNameW, headerNameW, headerMoveW, headerActionsW = managerColumnWidths(rowW, 0)
+    -- All row controls are PrettyUI components on the native scrolling row.
+    local baseNameW, headerNameW, headerMoveW, headerActionsW = managerColumnWidths(rowW, 0, self.moveMode)
     pcall(function()
         local header = ui.Panel.new(treeParent)
         header.isVertical = false
@@ -1375,10 +1278,14 @@ function Manager:_rebuild()
         header.clickthrough = true
         header:SetSize(rowW, Theme.MANAGER_HEADER_H)
         mountHeaderCell(header, Theme.MANAGER_ENABLE_W, Theme.MANAGER_HEADER_H, "Enabled", true)
-        mountHeaderCell(header, headerMoveW, Theme.MANAGER_HEADER_H, "Move", true)
+        if self.moveMode then mountHeaderCell(header, headerMoveW, Theme.MANAGER_HEADER_H, "Move", true) end
         mountHeaderCell(header, headerNameW, Theme.MANAGER_HEADER_H, "Alert", false)
+        mountHeaderCell(header, Theme.MANAGER_SELECT_W, Theme.MANAGER_HEADER_H, "Select", true)
         mountHeaderCell(header, headerActionsW, Theme.MANAGER_HEADER_H, "Actions", true)
     end)
+    if #rows == 0 then
+        mountHeaderCell(treeParent, rowW, 40, "No alerts yet. Select + New alert to create one.", false)
+    end
     for _, row in ipairs(rows) do
         local capturedRow = row
         local rowPanel = treeParent
@@ -1400,33 +1307,35 @@ function Manager:_rebuild()
         -- equals baseNameW and the Actions cluster stays put across depths.
         local indent = (row.depth or 0) * Theme.MANAGER_ROW_INDENT
         local nameX = Theme.MANAGER_ENABLE_W
-            + Theme.MANAGER_REORDER_COUNT * Theme.MANAGER_REORDER_W
-            + (1 + Theme.MANAGER_REORDER_COUNT) * Theme.MANAGER_ROW_GAP
+            + (self.moveMode and Theme.MANAGER_REORDER_COUNT or 0) * Theme.MANAGER_REORDER_W
+            + (1 + (self.moveMode and Theme.MANAGER_REORDER_COUNT or 0)) * Theme.MANAGER_ROW_GAP
             + indent
-        local _, nameW = managerColumnWidths(rowW, row.depth)
+        local _, nameW = managerColumnWidths(rowW, row.depth, self.moveMode)
         local canUp, canDown, canLift = self:RowMoveCaps(row.id)
 
-        mountEnableToggle(rowPanel, row.enabled and true or false, function()
+        self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountCheckbox(rowPanel, Theme.MANAGER_ENABLE_W, row.enabled, function()
             self:ToggleEnabled(capturedRow.id)
             self:_rebuild()
         end)
 
         -- Illegal moves stay mounted, disabled.
-        self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountRowSprite(
-            rowPanel, "ARROW_UP", function()
-                self:ReorderSibling(capturedRow.id, -1)
-                self:_rebuild()
-            end, Theme.MANAGER_REORDER_W, not canUp, "Move up")
-        self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountRowSprite(
-            rowPanel, "ARROW_DOWN", function()
-                self:ReorderSibling(capturedRow.id, 1)
-                self:_rebuild()
-            end, Theme.MANAGER_REORDER_W, not canDown, "Move down")
-        self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountRowSprite(
-            rowPanel, "ARROW_LEFT", function()
-                self:Lift(capturedRow.id)
-                self:_rebuild()
-            end, Theme.MANAGER_REORDER_W, not canLift, "Lift")
+        if self.moveMode then
+            self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountRowSprite(
+                rowPanel, "ARROW_UP", function()
+                    self:ReorderSibling(capturedRow.id, -1)
+                    self:_rebuild()
+                end, Theme.MANAGER_REORDER_W, not canUp, "Move up")
+            self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountRowSprite(
+                rowPanel, "ARROW_DOWN", function()
+                    self:ReorderSibling(capturedRow.id, 1)
+                    self:_rebuild()
+                end, Theme.MANAGER_REORDER_W, not canDown, "Move down")
+            self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountRowSprite(
+                rowPanel, "ARROW_LEFT", function()
+                    self:Lift(capturedRow.id)
+                    self:_rebuild()
+                end, Theme.MANAGER_REORDER_W, not canLift, "Move out of group")
+        end
 
         -- Nesting indent: empty Panel so horizontal auto-layout shifts the name button right.
         -- spacerW + Theme.MANAGER_ROW_GAP + nameW == baseNameW keeps action columns aligned.
@@ -1442,43 +1351,27 @@ function Manager:_rebuild()
             end)
         end
 
-        prettyui.SimpleButton.new(rowPanel, self:RowLabel(row), function()
+        local titleButton = prettyui.SimpleButton.new(rowPanel, self:RowLabel(row), function()
             self:_onRowPress(capturedRow)
             if capturedRow.kind == "group" then self:_rebuild() end
         end, {
             width = nameW,
             height = Theme.MANAGER_ROW_H,
+            colour = (not row.enabled or row.pausedByGroup) and 0xA49C8EFF or 0xE7D7B0FF,
+            tooltip = row.kind == "group" and "Expand or collapse group" or "Open alert editor",
+            hoverCursor = config.Cursor.CURSOR_OPEN,
+            active = self.selected[row.id] == true,
         })
 
-        -- Actions cluster: select checkbox, then pencil / export / trash.
-        -- Native ui.Check, not prettyui.CheckboxButton.
-        local selectMounted = false
-        if ui.Check ~= nil then
-            local sel
-            local oks = pcall(function() sel = ui.Check.new(rowPanel) end)
-            if oks and sel ~= nil then
-                pcall(function()
-                    sel.stylesheetID = safeCheckStyle()
-                    sel:SetSize(Theme.MANAGER_SELECT_W, Theme.MANAGER_ROW_H)
-                    sel.buttonSize = math.min(Theme.MANAGER_SELECT_W - 2, Theme.MANAGER_ROW_H - 2)
-                    sel.value = self.selected[row.id] and true or false
-                    sel.label = ""
-                    sel:Subscribe(ui.Hook.ONBUTTONPRESSED, function()
-                        self:ToggleSelection(capturedRow.id, isShiftDown())
-                        self:_rebuild()
-                        return true
-                    end)
-                end)
-                selectMounted = true
-            end
-        end
-        if not selectMounted then
-            local mark = self.selected[row.id] and "[*]" or "[ ]"
-            mountButton(rowPanel, 0, 0, Theme.MANAGER_SELECT_W, Theme.MANAGER_ROW_H, mark, function()
-                self:ToggleSelection(capturedRow.id, isShiftDown())
-                self:_rebuild()
-            end)
-        end
+        -- Selection has its own column before the row actions.
+        titleButton.content.alignHorizontal = ui.AlignMode.TOPLEFT
+        titleButton.content:SetPos(10, 0)
+        titleButton.content:SetSize(-20, 0, 1.0, 1.0)
+        self.rowSpriteButtons[#self.rowSpriteButtons + 1] = titleButton
+        self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountCheckbox(rowPanel, Theme.MANAGER_SELECT_W, self.selected[row.id], function()
+            self:ToggleSelection(capturedRow.id, isShiftDown())
+            self:_rebuild()
+        end)
 
         self.rowSpriteButtons[#self.rowSpriteButtons + 1] = mountRowSprite(
             rowPanel, "PENCIL", function()
@@ -1543,23 +1436,13 @@ end
 function Manager:_onRowPress(row)
     local scopeKey = self:ActiveScopeKey()
     if scopeKey == nil then return end
-    if row.kind == "group" then
-        self:_activateRow(scopeKey, row)
-        return
-    end
-    local isDouble = (row.id == self.lastRowId)
-        and (self.tick - self.lastRowTick) <= Theme.DOUBLECLICK_TICKS
-    self.lastRowId, self.lastRowTick = row.id, self.tick
-    if isDouble then
-        self.lastRowId = nil
-        self:_activateRow(scopeKey, row)
-    end
+    self:_activateRow(scopeKey, row)
 end
 
 function Manager:Update()
-    self.tick = self.tick + 1
     if not self.visible or self.tabs == nil then return end
-    if self:_signature() ~= self.lastSignature then
+    local width, height = contentSize(self.contentParent)
+    if width ~= self.window.w or height ~= self.window.h or self:_signature() ~= self.lastSignature then
         self:_rebuild()
     end
 end

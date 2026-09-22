@@ -133,7 +133,7 @@ function TestImportExport:testImportFailureStacksErrorAndKeepsPaste()
     luaunit.assertFalse(win.destroyed)
     luaunit.assertEquals(win.fields[1]:GetText(), "bad")
     local err = windows[2]
-    luaunit.assertEquals(err.title, "Import")
+    luaunit.assertEquals(err.title, "Could not import alerts")
     luaunit.assertEquals(err.texts[1], "not a Watchdog export envelope")
     button(err, "Close").action()
     luaunit.assertEquals(Dialog.depth(self.parent), 1)

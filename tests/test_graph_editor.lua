@@ -122,7 +122,7 @@ function TestGraphEditor:testBindEntryBindsGraphAndResetsView()
     luaunit.assertIs(editor.graph, self.graph)
     luaunit.assertIs(editor:GetLayout(), layout)
     luaunit.assertEquals(editor.view.panX, 0)
-    luaunit.assertEquals(editor.view.panY, 0)
+    luaunit.assertEquals(editor.view.panY, 84)
     luaunit.assertEquals(editor.view.zoom, 1.0)
     luaunit.assertNil(editor.selected)
     luaunit.assertEquals(editor.nodeOrder, {})
@@ -252,17 +252,17 @@ function TestGraphEditor:testViewCenterGraphAtDefaultFraming()
     editor.window.w, editor.window.h = 400, 300
     local gx, gy = editor:viewCenterGraph()
     luaunit.assertEquals(gx, 200)
-    luaunit.assertEquals(gy, 150)
+    luaunit.assertEquals(gy, 192)
 end
 
 function TestGraphEditor:testViewCenterGraphAccountsForPanAndZoom()
     local editor = Editor.new(self.registry, nil)
     editor.window.w, editor.window.h = 400, 300
     editor.view.panX, editor.view.panY, editor.view.zoom = 40, -20, 2.0
-    -- ToGraph((400/2), (300/2)) = (200-40)/2, (150-(-20))/2 = 80, 85
+    -- The 84px toolbar leaves the viewport center at (200, 192).
     local gx, gy = editor:viewCenterGraph()
     luaunit.assertEquals(gx, 80)
-    luaunit.assertEquals(gy, 85)
+    luaunit.assertEquals(gy, 106)
 end
 
 function TestGraphEditor:testOpenPaletteFromPlusAnchorsAtViewCenter()
@@ -278,12 +278,11 @@ function TestGraphEditor:testOpenPaletteFromPlusAnchorsAtViewCenter()
 
     luaunit.assertTrue(editor.palette.open)
     luaunit.assertEquals(editor.palette.anchorGX, 80)
-    luaunit.assertEquals(editor.palette.anchorGY, 85)
+    luaunit.assertEquals(editor.palette.anchorGY, 106)
     luaunit.assertTrue(editor.palette.centerOnAnchor)
-    -- Title strip: origin (100-8, 200-32), size (400+16, 32). PLUS at
-    -- x=92+416-34-6-18=450, y=168+floor((32-18)/2)=175. Palette hangs under it.
-    luaunit.assertEquals(editor.palette.screenX, 450)
-    luaunit.assertEquals(editor.palette.screenY, 193)
+    -- Palette opens below Add alert node in the second toolbar row.
+    luaunit.assertEquals(editor.palette.screenX, 112)
+    luaunit.assertEquals(editor.palette.screenY, 274)
 end
 
 --- Wheel lattice vs Palette scroll -------------------------------------------------------
@@ -335,7 +334,7 @@ function TestGraphEditor:testOnResetViewZerosPanAndDefaultZoom()
     editor.view.panX, editor.view.panY, editor.view.zoom = 123, 45, 2.0
     editor:onResetView()
     luaunit.assertEquals(editor.view.panX, 0)
-    luaunit.assertEquals(editor.view.panY, 0)
+    luaunit.assertEquals(editor.view.panY, 84)
     luaunit.assertEquals(editor.view.zoom, 1.0)
     luaunit.assertEquals(View.Rungs()[View.RungIndex(editor.view.zoom)], 1.0)
 end
@@ -462,7 +461,7 @@ function TestGraphEditor:testPlaceFromPlusCentersNodeBodyOnViewCenter()
     local pos = editor.layout[id]
     local geom = Node.BuildGeometry(self.graph:GetPins(id), 0, 0, Theme.NODE_WIDTH)
     luaunit.assertEquals(pos.x + geom.w * 0.5, 200)
-    luaunit.assertEquals(pos.y + geom.h * 0.5, 150)
+    luaunit.assertEquals(pos.y + geom.h * 0.5, 108)
 end
 
 local function registerModeFixture(registry)

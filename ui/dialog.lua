@@ -1,6 +1,6 @@
 -- Dialog: PrettyUI Window chrome — centered, modal dim, footer actions, per-parent stack.
 -- Titlebar X is onDismiss only (not a generic onClose and not an action onClick).
--- Esc is intentionally unbound: the client would also open the pause menu.
+-- The editor routes Escape to dismissTop; the dialog does not bind a global key.
 
 local Dialog = {}
 
@@ -167,6 +167,9 @@ local function syncChrome(parent)
     end)
 end
 
+function Dialog.raiseToFront(parent)
+    syncChrome(parent)
+end
 local pop
 
 ---@param frame Watchdog.DialogFrame
@@ -191,6 +194,12 @@ pop = function(frame, skipDestroy)
         end)
     end
     syncChrome(parent)
+end
+function Dialog.dismissTop(parent)
+    local s = stacks[parent]
+    if s == nil or #s == 0 then return false end
+    s[#s].win:Close()
+    return true
 end
 
 ---@param parent any

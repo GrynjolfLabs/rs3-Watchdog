@@ -2,6 +2,9 @@
 -- Overlay Layer is a sibling of the window (full-screen capture/palette). Show/Close is
 -- independent of stack depth (F8/ribbon/close hide without clearing the stack).
 
+local Resize = require("ui/window_resize")
+local Dialog = require("ui/dialog")
+
 ---@class Watchdog.MuxSurface
 ---@field id string                         # stable id for debugging / IsTop
 ---@field title string|fun():string         # window title while this surface is top
@@ -132,6 +135,7 @@ function Multiplexer:Mount(parent)
         self._ownsRoot = false
     else
         rootLayer = ui.Layer.new(parent)
+        rootLayer.clickthrough = true
         rootLayer:SetPos(0, 0)
         rootLayer:SetSize(0, 0, 1.0, 1.0)
         self._ownsRoot = true
@@ -159,6 +163,7 @@ function Multiplexer:Mount(parent)
     overlay:SetSize(0, 0, 1.0, 1.0)
     overlay.clickthrough = true
     self._overlay = overlay
+    self.resizeHandle = Resize.new(self.window, rootLayer)
     self._ownsOverlay = true
 
     -- Register the overlay with PrettyUI's window overlay list so Show / title-drag end
@@ -184,6 +189,7 @@ function Multiplexer:Mount(parent)
 end
 
 function Multiplexer:Unmount()
+    if self.resizeHandle ~= nil then self.resizeHandle:Destroy(); self.resizeHandle = nil end
     for i = #self._stack, 1, -1 do
         local surface = self._stack[i]
         if surface ~= nil and surface.SetVisible ~= nil then
@@ -351,6 +357,7 @@ function Multiplexer:SetVisible(v)
     if self._visible == v then return end
     self._visible = v
 
+    if self.resizeHandle ~= nil then self.resizeHandle:Sync(v) end
     if v then
         -- Overlay is a window sibling; unhide before Show so Raise/capture order is intact.
         if self._overlay ~= nil then
@@ -441,6 +448,21 @@ function Multiplexer:RaiseToFront()
     if self._overlay ~= nil and self._overlay.MoveToFront ~= nil then
         self._overlay:MoveToFront()
     end
+    self:SyncChrome()
+end
+-- Native dragging raises the window background; restore overlays before drag capture.
+function Multiplexer:SyncChrome()
+    if self.window == nil then return end
+    if self._visible and self._overlay ~= nil and self._overlay.MoveToFront ~= nil then
+        self._overlay:MoveToFront()
+    end
+    local interactive = self._visible and Dialog.depth(self._overlay) == 0
+    if self.window.titleDrag ~= nil then
+        self.window.titleDrag.hidden = not interactive
+        if interactive then self.window.titleDrag:MoveToFront() end
+    end
+    if self.resizeHandle ~= nil then self.resizeHandle:Sync(interactive) end
+    if self._visible then Dialog.raiseToFront(self._overlay) end
 end
 
 return Multiplexer
