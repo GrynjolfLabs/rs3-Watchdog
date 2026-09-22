@@ -86,7 +86,7 @@ function TestUILayout:testManagerControlsAtMinimumWidth()
             return c
         end,
     }
-    id = { Sprite = { RS3_ICON_EXTERNAL_LINK_24PX_2 = 100, HUD_COMBAT_BTN_BIN = 101 }, Font = { MUSEO_SANS_15PT_REGULAR = 1 }, StyleSheet = { CHECKBOX_DEFAULT = 1 } }
+    id = { Sprite = { RS3_ICON_RUNEMETRICS_NEW_2 = 102, RS3_ICON_EXTERNAL_LINK_24PX_2 = 100, HUD_COMBAT_BTN_BIN = 101 }, Font = { MUSEO_SANS_15PT_REGULAR = 1 }, StyleSheet = { CHECKBOX_DEFAULT = 1 } }
     config = { Cursor = { CURSOR_OPEN = 1 }, Font = { CINZEL_13PT_BOLD = {
         GetStringWidth = function(_, text) return #text * 8 end,
     } } }

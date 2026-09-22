@@ -1117,11 +1117,21 @@ local function isShiftDown()
     return shift
 end
 
+local function addButtonIcon(button, spriteID)
+    button.content:SetPos(30, 0)
+    button.content:SetSize(-38, 0, 1.0, 1.0)
+    local icon = ui.Sprite.new(button.root)
+    icon.spriteID = spriteID
+    icon:SetSize(18, 18)
+    icon:SetPos(8, -9, 0, 0.5)
+    icon.clickthrough = true
+end
+
 -- Tabs has no trailing-actions API (only TabPage is a ContentMethods host) - AddFancyButton + abs coords.
 function Manager:_mountToolbar()
     local y = Theme.MANAGER_TAB_BASELINE + 8
     local gap = Theme.MANAGER_TOOLBAR_GAP
-    local function add(text, x, action, primary, width)
+    local function add(text, x, action, primary, width, spriteID)
         local options = { x = x, y = y, width = width, height = 28,
             variant = primary and "positive" or "neutral" }
         local button
@@ -1131,6 +1141,7 @@ function Manager:_mountToolbar()
         else
             button = self.layoutHost:AddSimpleButton(text, action, options)
         end
+        if spriteID then addButtonIcon(button, spriteID) end
         self.toolbarButtons[#self.toolbarButtons + 1] = button
         return button
     end
@@ -1144,9 +1155,11 @@ function Manager:_mountToolbar()
     end, false, 112)
     if not self:HasSelection() then
         local right = self.window.w - Theme.MANAGER_PAGE_PAD
-        add("Export", right - 76, function() self:ExportScope() end, false, 76)
-        add("Import", right - 160, function() self:OpenImport() end, false, 76)
-        local move = add(self.moveMode and "Done moving" or "Move", right - 280, function()
+        add("Export", right - 100, function() self:ExportScope() end, false, 100,
+            id.Sprite.RS3_ICON_EXTERNAL_LINK_24PX_2)
+        add("Import", right - 208, function() self:OpenImport() end, false, 100,
+            id.Sprite.RS3_ICON_RUNEMETRICS_NEW_2)
+        local move = add(self.moveMode and "Done moving" or "Move", right - 328, function()
             self:ToggleMoveMode(); self:_rebuild()
         end, false, 112)
         move:SetActive(self.moveMode)
@@ -1177,13 +1190,7 @@ function Manager:_mountBulkBar(y)
         end)
         if btn ~= nil then
             if spriteID then
-                btn.content:SetPos(30, 0)
-                btn.content:SetSize(-38, 0, 1.0, 1.0)
-                local icon = ui.Sprite.new(btn.root)
-                icon.spriteID = spriteID
-                icon:SetSize(18, 18)
-                icon:SetPos(8, -9, 0, 0.5)
-                icon.clickthrough = true
+                addButtonIcon(btn, spriteID)
             end
             self.bulkBarButtons[#self.bulkBarButtons + 1] = btn
             x = x + w + gap
