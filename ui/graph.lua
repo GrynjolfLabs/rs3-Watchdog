@@ -1545,8 +1545,9 @@ function Editor:drawZoomTick()
     if w <= 0 or h <= 0 then return end
     local n = #View.Rungs()
     local t = (View.RungIndex(1.0) - 1) / (n - 1)
-    local x = math.floor(t * (w - 1) + 0.5) - 8
-    c:AddLine(x, 2, x, h - 2, 2, Theme.Vec4(Theme.COL_ZOOM_TICK))
+    local centerX = math.floor(t * (w - 1) + 0.5) - 4
+    -- Use a filled rectangle: native line thickness expands on both sides.
+    c:AddRectangle(centerX - 1, 2, 2, h - 4, Theme.Vec4(Theme.COL_ZOOM_TICK))
 end
 
 --- Visibility
