@@ -14,6 +14,7 @@ local function categoryRank(cat)
 end
 
 local function categoryLabel(cat)
+    if cat == "boolean" then return "Logic" end
     return cat:sub(1, 1):upper() .. cat:sub(2)
 end
 

@@ -1,4 +1,4 @@
--- Add Compare and group the standard boolean nodes under Logic.
+-- Add Compare to the standard boolean category.
 -- Hide legacy comparisons so saved alerts keep their original behavior.
 local Compare = {}
 
@@ -12,14 +12,8 @@ local operations = {
 }
 
 function Compare.Register(registry)
-    for _, definition in pairs(registry.nodeTypes) do
-        if definition.category == "boolean" then
-            definition.category = "logic"
-        end
-    end
-
     registry:RegisterNodeType("std.compare", {
-        category = "logic",
+        category = "boolean",
         displayName = "Compare",
         description = "Compare two values using the selected operation.",
         pins = {

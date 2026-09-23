@@ -124,18 +124,18 @@ end
 
 function TestCompare:testComparisonsAndBooleanOperatorsShareLogicGroup()
     for _, key in ipairs({ "std.compare", "std.and", "std.or", "std.not", "std.xor" }) do
-        luaunit.assertEquals(self.registry:GetNodeType(key).category, "logic")
+        luaunit.assertEquals(self.registry:GetNodeType(key).category, "boolean")
     end
     local palette = Palette.new()
     palette:Open(self.registry, nil, { screenX = 0, screenY = 0, anchorGX = 0, anchorGY = 0 })
     local comparisonKeys = {}
     for _, row in ipairs(palette.rows) do
         luaunit.assertNotEquals(row.category, "compare")
-        luaunit.assertNotEquals(row.category, "boolean")
-        if row.header and row.category == "logic" then
+        luaunit.assertNotEquals(row.category, "logic")
+        if row.header and row.category == "boolean" then
             luaunit.assertEquals(row.label, "Logic")
         end
-        if not row.header and row.category == "logic" then
+        if not row.header and row.category == "boolean" then
             comparisonKeys[#comparisonKeys + 1] = row.typeKey
         end
     end
