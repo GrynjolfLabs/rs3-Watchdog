@@ -138,7 +138,7 @@ _Avoid_: Field, input box, widget (that's the mounted Editor), textbox
 A Node that compares two values and produces a boolean Result. Its Operation Control
 selects equality, inequality, greater than, less than, greater or equal, or less or equal.
 Changing the Operation leaves the two input Pins and their Wires in place.
-_Avoid_: Six separate comparison types (these remain only in previously saved alerts)
+_Avoid_: Separate comparison types. Existing saved alerts can still use the old types.
 
 **Control Editor**:
 The single transient real component (`ui.InputField` for text/number, `ui.ComboField` for

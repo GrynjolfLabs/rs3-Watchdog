@@ -2,7 +2,7 @@ local Enum = require("ui/controls/enum")
 local Theme = require("ui/theme")
 
 -- <lt> and <gt> display angle brackets without starting a client formatting tag.
--- Labels change; stored operators do not.
+-- Each label maps to its stored operator.
 local CompareOperation = Enum.new({
     { value = "==", label = "Equals (==)" },
     { value = "!=", label = "Not Equals (!=)" },

@@ -11,8 +11,8 @@ end
 local testsDir = scriptDir()
 local rootDir = testsDir .. "../"
 
--- runtime.lua and the node files are exercised against a real Graph/Registry, so
--- LibNodeGraph and LibNodeGraphStd must be available as sibling folders or on LUA_PATH.
+-- Tests use the real graph libraries. Put LibNodeGraph and LibNodeGraphStd
+-- in sibling folders or on LUA_PATH.
 package.path = rootDir .. "?.lua;" .. testsDir .. "?.lua;" .. rootDir .. "../LibNodeGraph/?.lua;" .. package.path
 package.path = rootDir .. "../LibNodeGraphStd/?.lua;" .. package.path
 
