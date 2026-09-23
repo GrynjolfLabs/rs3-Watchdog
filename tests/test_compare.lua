@@ -13,6 +13,7 @@ TestCompare = {}
 function TestCompare:setUp()
     self.registry = Registry.new()
     StandardCompare.Register(self.registry)
+    require("boolean").Register(self.registry)
     Compare.Register(self.registry)
     self.graph = Graph.new(self.registry)
 end
@@ -122,7 +123,9 @@ function TestCompare:testChangingOperationPreservesWiredInputs()
 end
 
 function TestCompare:testComparisonsAndBooleanOperatorsShareLogicGroup()
-    require("boolean").Register(self.registry)
+    for _, key in ipairs({ "std.compare", "std.and", "std.or", "std.not", "std.xor" }) do
+        luaunit.assertEquals(self.registry:GetNodeType(key).category, "logic")
+    end
     local palette = Palette.new()
     palette:Open(self.registry, nil, { screenX = 0, screenY = 0, anchorGX = 0, anchorGY = 0 })
     local comparisonKeys = {}

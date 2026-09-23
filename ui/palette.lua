@@ -9,9 +9,6 @@ Palette.__index = Palette
 -- and fall back to an alphabetical tie-break.
 local CATEGORY_RANK = { trigger = 1, action = 2 }
 
--- Comparisons and boolean operators both build conditions.
-local CATEGORY_GROUP = { boolean = "logic", compare = "logic" }
-
 local function categoryRank(cat)
     return CATEGORY_RANK[cat] or math.huge
 end
@@ -82,7 +79,7 @@ function Palette:Open(registry, filterFn, opts)
         local targetPin, targetMode = true, nil
         if filterFn ~= nil then targetPin, targetMode = filterFn(def) end
         if targetPin then
-            local cat = CATEGORY_GROUP[def.category] or def.category or "other"
+            local cat = def.category or "other"
             ensureCat(cat)
             byCat[cat][#byCat[cat] + 1] = {
                 typeKey = key,

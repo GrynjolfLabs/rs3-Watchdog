@@ -1,8 +1,8 @@
 local Enum = require("ui/controls/enum")
 local Theme = require("ui/theme")
 
--- Client text uses markup: <lt>/<gt> render literal angle brackets. Keep the
--- stored operators unchanged; the enum maps selected labels back to those values.
+-- <lt> and <gt> display angle brackets without starting a client formatting tag.
+-- Labels change; stored operators do not.
 local CompareOperation = Enum.new({
     { value = "==", label = "Equals (==)" },
     { value = "!=", label = "Not Equals (!=)" },
@@ -12,8 +12,7 @@ local CompareOperation = Enum.new({
     { value = "<=", label = "Less or Equal (<lt>=)" },
 })
 
--- The full English labels need the node's width, rather than the narrow value
--- column beside the operation pin and result output.
+-- Use the node's width so the English labels fit.
 CompareOperation.Inline = false
 function CompareOperation.ReservedHeight(_pin)
     return Theme.CONTROL_H + Theme.CONTROL_PAD_X

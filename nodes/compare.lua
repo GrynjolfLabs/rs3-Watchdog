@@ -1,6 +1,5 @@
--- Watchdog's consolidated presentation of the standard comparisons. Keep the
--- dependency's original definitions intact so saved alerts retain their pin
--- types, defaults, connections, and behavior; only hide their palette entries.
+-- Add Compare and group the standard boolean nodes under Logic.
+-- Hide legacy comparisons so saved alerts keep their original behavior.
 local Compare = {}
 
 local operations = {
@@ -13,8 +12,14 @@ local operations = {
 }
 
 function Compare.Register(registry)
+    for _, definition in pairs(registry.nodeTypes) do
+        if definition.category == "boolean" then
+            definition.category = "logic"
+        end
+    end
+
     registry:RegisterNodeType("std.compare", {
-        category = "compare",
+        category = "logic",
         displayName = "Compare",
         description = "Compare two values using the selected operation.",
         pins = {
