@@ -173,7 +173,6 @@ function TestWindowChrome:testChromeFollowsWindowDuringTitleDragRestack()
     luaunit.assertTrue(positions[self.window.root] < positions[self.overlay])
 end
 function TestWindowChrome:testSyncChromeDoesNotCollapseExpandedTitleDrag()
-    -- PrettyUI fullscreen title capture; SyncChrome must not shrink or bury it.
     self.window.titleDrag:SetPos(0, 0)
     self.window.titleDrag:SetSize(0, 0, 1.0, 1.0)
     self.window.root:MoveToFront()
@@ -217,7 +216,6 @@ function TestWindowChrome:testModalBlocksEditorInput()
     luaunit.assertEquals(Dialog.depth(self.overlay), 0)
 end
 function TestWindowChrome:testSyncChromeRaisesOverlayTooltipAboveMaximize()
-    -- Visible overlay tips must outrank Maximize after SyncChrome restacks it.
     local tipRoot = component(self.overlay)
     tipRoot.hidden = false
     self.mux:Push({

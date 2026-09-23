@@ -1,7 +1,3 @@
--- multiplexer.lua - one prettyui.Window host; Push/Pop surfaces inside window.content.
--- Overlay Layer is a sibling of the window (full-screen capture/palette). Show/Close is
--- independent of stack depth (F8/ribbon/close hide without clearing the stack).
-
 local Resize = require("ui/window_resize")
 
 ---@class Watchdog.MuxSurface
@@ -11,7 +7,6 @@ local Resize = require("ui/window_resize")
 ---@field OnShellHide fun(self)|nil         # optional: shell tucked (F8/Close); stack kept
 ---@field FrontOverlayPopups fun(self)|nil
 
---- Minimal window seam Multiplexer drives (prettyui.Window or a test fake).
 ---@class Watchdog.MuxWindow
 ---@field content any
 ---@field Show fun(self)
@@ -23,7 +18,6 @@ local Resize = require("ui/window_resize")
 ---@field titleDrag any|nil
 ---@field onClose (fun(self: Watchdog.MuxWindow))|nil
 ---@field _RegisterOverlay fun(self, component: any, isVisible: (fun(): boolean)|nil, layout: (fun())|nil)|nil
---- Test-fake counters / flags (absent on real prettyui.Window).
 ---@field title string|nil
 ---@field shown boolean|nil
 ---@field closeCount integer|nil
@@ -63,8 +57,6 @@ local Resize = require("ui/window_resize")
 local Multiplexer = {}
 Multiplexer.__index = Multiplexer
 
--- Wire Close → SetVisible(false) without re-entering Close (prettyui calls onClose from
--- Close before it hides the root).
 ---@param self Watchdog.Multiplexer
 ---@return fun()
 local function bindOnClose(self)
@@ -75,8 +67,6 @@ local function bindOnClose(self)
         self._inCloseCallback = false
     end
 end
-
---- Construction ---------------------------------------------------------------------------
 
 ---@param opts Watchdog.MultiplexerOpts|nil
 ---@return Watchdog.Multiplexer
@@ -119,8 +109,6 @@ function Multiplexer.new(opts)
 
     return self
 end
-
---- Mount / unmount ------------------------------------------------------------------------
 
 ---@param parent any
 ---@return Watchdog.Multiplexer
@@ -165,10 +153,7 @@ function Multiplexer:Mount(parent)
     self.resizeHandle = Resize.new(self.window, rootLayer, overlay)
     self._ownsOverlay = true
 
-    -- Register the overlay with PrettyUI's window overlay list so Show / title-drag end
-    -- re-MoveToFront it after the window root (and titleDrag). Without this, Window:Show
-    -- and title ONCLICK leave the window above the overlay - Editor capture never receives
-    -- content clicks, and the palette Canvas draws behind the chrome.
+    -- PrettyUI raises the window on show and drag; register the overlay to keep it above the window.
     if self.window._RegisterOverlay ~= nil then
         pcall(function()
             self.window:_RegisterOverlay(overlay, function()
@@ -177,9 +162,7 @@ function Multiplexer:Mount(parent)
         end)
     end
 
-    -- Start hidden (Close = hide; destroyOnClose false). Overlay is a sibling of the window
-    -- root, so Close alone does not cover it - hide it explicitly or Editor capture can
-    -- intercept game input while the shell is tucked away.
+    -- The overlay is a sibling of the window, so closing the window does not hide it.
     self._visible = false
     self.window:Close()
     pcall(function() overlay.hidden = true end)
@@ -221,8 +204,6 @@ function Multiplexer:Destroy()
     self._injected = false
 end
 
---- Accessors ------------------------------------------------------------------------------
-
 ---@return any
 function Multiplexer:Content()
     if self.window == nil then return nil end
@@ -238,8 +219,6 @@ end
 function Multiplexer:Overlay()
     return self._overlay
 end
-
---- Title / visibility ---------------------------------------------------------------------
 
 ---@param surface Watchdog.MuxSurface|nil
 ---@return string
@@ -274,8 +253,6 @@ local function applySurfaceVisibility(self, showTop)
         end
     end
 end
-
---- Stack ----------------------------------------------------------------------------------
 
 ---@param surface Watchdog.MuxSurface
 function Multiplexer:Push(surface)
@@ -334,10 +311,7 @@ function Multiplexer:IsTop(id)
     return top ~= nil and top.id == id
 end
 
---- Window shell visibility ----------------------------------------------------------------
-
--- Overlay-parented PrettyUI tooltips live on the mux root Layer, not the Window.
--- Window:Close() therefore leaves a hovered tip stuck until we Hide() it.
+-- Window.Close does not hide tooltips parented to the overlay.
 local function hidePrettyUiTooltipTree(ctx)
     if ctx == nil then return end
     for _, tip in ipairs(ctx.tooltips or {}) do
@@ -358,21 +332,17 @@ function Multiplexer:SetVisible(v)
 
     if self.resizeHandle ~= nil then self.resizeHandle:Sync(v) end
     if v then
-        -- Overlay is a window sibling; unhide before Show so Raise/capture order is intact.
         if self._overlay ~= nil then
             pcall(function() self._overlay.hidden = false end)
         end
         if self.window ~= nil and self.window.Show ~= nil then
             self.window:Show()
         end
-        -- Belt-and-suspenders: Show + registered overlays should already front the overlay,
-        -- but fakes / older PrettyUI without _RegisterOverlay still need an explicit raise.
         self:RaiseToFront()
         applySurfaceVisibility(self, true)
         applyTitle(self)
     else
-        -- Notify the top surface before tucking the shell: close palette / abandon gestures
-        -- without surface SetVisible(false) (pan/zoom and bound editor state must survive F8).
+        -- Dismiss gestures without resetting the editor state on F8.
         local top = self._stack[#self._stack]
         if top ~= nil and top.OnShellHide ~= nil then
             pcall(function() top:OnShellHide() end)
@@ -384,14 +354,10 @@ function Multiplexer:SetVisible(v)
                 hidePrettyUiTooltipTree(prettyui.Tooltip.getContext(content))
             end
         end
-        -- Hide overlay first so Editor capture (mounted there) cannot eat clicks while the
-        -- shell is closed. Do not flip surface SetVisible - keeps pan/zoom across F8 and
-        -- lets Show restore the same top without resetView side effects.
         if self._overlay ~= nil then
             pcall(function() self._overlay.hidden = true end)
         end
-        -- Close the window without clearing the stack. Skip Close when we are already inside
-        -- the window's onClose (Close → onClose → SetVisible(false)) to avoid recursion.
+        -- Skip Close inside its own callback to avoid recursion.
         if self.window ~= nil and self.window.Close ~= nil and not self._inCloseCallback then
             self.window:Close()
         end
@@ -401,8 +367,7 @@ function Multiplexer:SetVisible(v)
     end
 end
 
--- Object Marker select: hide Watchdog chrome (and the overlay capture) so Loc MiniMenu
--- hover works. No-op if the shell was already down (F8); Restore must not pop it back up.
+-- Restore the shell only if object selection hid it.
 function Multiplexer:HideForCapture()
     if self._hiddenForCapture or not self._visible then
         return

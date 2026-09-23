@@ -23,8 +23,6 @@ else
     log("Watchdog: plugin does NOT have HTTP access")
 end
 
---- Runtime dispatcher + registry + node types --------------------------------------------
-
 local playerIdentity = {
     Resolve = function()
         if Player == nil or not Player.IsAvailable() then return nil end
@@ -98,7 +96,6 @@ Event.OptionalDependencyChanged.Subscribe('opdepchanged', function(dep)
     elseif dep.pluginIdentifier == "shortestpath" and shortestpath ~= nil then
         if dep.enabled then
             print("shortestpath is now available, reloading")
-            -- require("nodes/actions/shortest_path").Register(registry, runtime)
             ExecuteConsoleCommand("prl Watchdog")
         end
     end
@@ -119,7 +116,6 @@ runtime:SetBucketLoader(function(normalized)
     local restoredChar = {}
     local ok, r = pcall(function() return Store.RestoreAll(playerDoc, registry) end)
     if ok and r ~= nil then restoredChar = r end
-    -- Loader has no pretty name yet; getScopes replaces this with GetActiveCharacter.
     charScope = { key = key, displayName = normalized, doc = playerDoc, alerts = restoredChar }
     return restoredChar
 end)
@@ -214,8 +210,6 @@ runtime.infobox:SetPersistence({
         Store.Save(document)
     end,
 })
-
---- Alert Manager + Editor navigation ----------------------------------------------------
 
 ---@param scopeKey string
 ---@param id integer
@@ -681,14 +675,11 @@ local function onImportJson(scopeKey, text)
     return true, report
 end
 
---- Client root parent (interface may not be loaded yet; retried on the Logic loop) ------
-
 local function getRootParent()
     local candidates = { "TOPLEVEL_V2__GAME_AREA" }
     for _, key in ipairs(candidates) do
         local componentID = id.Component[key]
         if componentID ~= nil then
-            -- Returns nil (not an error) if the interface isn't loaded yet.
             local component = ui.Interfaces:GetComponent(componentID)
             if component ~= nil then
                 return component
@@ -713,8 +704,7 @@ manager = Manager.new({
     onBulkMove = onBulkMove,
     onExportEntries = onExportEntries,
     onImportJson = onImportJson,
-    -- Same owned Layer the main shell Window uses - dialog dies with mux.rootLayer on
-    -- Stop / reload, instead of orphaning under the game area.
+    -- Parent dialogs to the shell so reload destroys them too.
     windowParent = function()
         return mux ~= nil and mux.rootLayer or nil
     end,
@@ -747,7 +737,6 @@ editor.onAlertNameChanged = function()
     mux:SyncTitle()
 end
 
--- Tuck the Watchdog shell while Select Object is armed so Loc MiniMenu isn't under the window.
 runtime.objectMarkerCapture.onArmedChange = function(armed)
     if mux == nil then return end
     if armed then
@@ -762,7 +751,6 @@ managerSurface = {
     id = "manager",
     title = "Watchdog - Alerts",
     SetVisible = function(_, v) manager:SetVisible(v) end,
-    -- F8/Close does not flip surface SetVisible; overlay-parented row tooltips must Hide here.
     OnShellHide = function() manager:OnShellHide() end,
 }
 editorSurface = {
@@ -773,13 +761,10 @@ editorSurface = {
         return "Watchdog - " .. name
     end,
     SetVisible = function(_, v) editor:SetVisible(v) end,
-    -- Shell hide (F8/Close) must dismiss palette/gestures without Editor:SetVisible(false),
-    -- so pan/zoom survive; mux calls this instead of flipping surface visibility.
+    -- Dismiss gestures without resetting pan and zoom on F8.
     OnShellHide = function() editor:OnShellHide() end,
     FrontOverlayPopups = function() editor:FrontOverlayPopups() end,
 }
-
---- Event loops --------------------------------------------------------------------------
 
 local state = {
     muxMounted = false,
@@ -792,7 +777,6 @@ local state = {
     infoboxWasDragging = false,
 }
 
--- Autosave only while a bound editor is visible (~2s). Flush on hide/unbind. Keys on boundScope + boundId.
 local SAVE_INTERVAL_TICKS = 100
 local saveState = { tick = 0, wasOpen = false }
 
@@ -824,7 +808,6 @@ local function onLogic(logicEvent)
                 pcall(function() runtime.infobox:Drag(mx, my) end)
             end
         elseif state.infoboxWasDragging then
-            -- Drag raised infobox capture over the window; restore mux so hover isn't stolen.
             pcall(function() mux:RaiseToFront() end)
         end
         state.infoboxWasDragging = dragging
@@ -843,7 +826,7 @@ local function onLogic(logicEvent)
         if parent ~= nil then
             if not state.effectsMounted then
                 pcall(function() runtime.effects:Mount(parent) end)
-                -- Mount swallows errors (canvas stays nil); don't trust pcall ok.
+                -- Mount catches errors; a successful call does not guarantee a canvas.
                 state.effectsMounted = runtime.effects:IsMounted()
                 pcall(function() runtime.toast:Mount(parent) end)
             end
@@ -895,7 +878,7 @@ local function onLogic(logicEvent)
     end
     pcall(function() editor:update() end)
 
-    -- mux hide does not flip editor:SetVisible, so require mux:IsVisible() or we'd autosave while tucked.
+    -- Hiding the shell leaves editor.visible set, so check the shell before autosaving.
     local isOpen = mux:IsVisible() and editor:IsVisible() and editor.boundId ~= nil
     if isOpen then
         saveState.tick = saveState.tick + 1
@@ -908,7 +891,6 @@ local function onLogic(logicEvent)
         pcall(persistNow)
     end
     saveState.wasOpen = isOpen
-
 
     LOGIC_TICK_LAST = logicEvent.logicTick
 end
@@ -926,13 +908,10 @@ local function onDraw()
             runtime.infobox:Draw(runtime.effects.canvas, hx, hy)
         end)
         pcall(function() runtime.screenMarkerCapture:Draw(runtime.effects.canvas) end)
-        -- Object-marker overlay is instruction-only; a dim would block MiniMenu.
         pcall(function() runtime.objectMarkerCapture:Draw(runtime.effects.canvas) end)
     end
     if mux ~= nil then mux:SyncChrome() end
 end
-
---- Public API + lifecycle ---------------------------------------------------------------
 
 local api = {}
 
@@ -963,7 +942,6 @@ end
 
 function api.Toggle()
     if mux == nil then return end
-    -- F8 during object select leaves the gesture, restoring the shell instead of toggling it away.
     if runtime.objectMarkerCapture ~= nil and runtime.objectMarkerCapture:IsArmed() then
         runtime.objectMarkerCapture:Cancel()
         return
@@ -1017,7 +995,7 @@ ribbon = prettyui.RibbonBar.Register({
 Watchdog = api
 print("Watchdog editor loaded")
 
--- ADR-0008: PersistentDB writes work here. Do not Destroy UI - client tears the tree down after.
+-- ADR-0008: Save here, but let the client destroy the UI tree.
 function PluginShutdown()
     pcall(persistNow)
     ribbon:Destroy()

@@ -1,7 +1,4 @@
--- Editor: Canvas viewport onto a live LibNodeGraph Graph (pan/zoom, hit-test, immediate-mode).
--- Mount: Canvas under contentParent; capture/toolbar/palette/transient fields under overlayParent
--- (mux overlay sits above the PrettyUI window, so clickables must be overlay children above capture).
--- Content-local (0,0) is content top-left (no WINDOW_HEADER_H); overlay chrome uses toScreen.
+-- Content coordinates start at the content origin; overlay coordinates are screen-relative.
 
 local Dialog = require("ui/dialog")
 local Theme    = require("ui/theme")
@@ -18,7 +15,6 @@ local InvViewer = require("ui/inv_viewer")
 local Editor = {}
 Editor.__index = Editor
 
--- Unbound until BindEntry (nil graph is inert). Pan/zoom is not restored. runtime is optional (Capture Arm).
 ---@param registry LibNodeGraph.Registry
 ---@param runtime Watchdog.Runtime|nil
 function Editor.new(registry, runtime)
@@ -67,7 +63,6 @@ function Editor.new(registry, runtime)
     return self
 end
 
--- Bind live graph + layout; drop previous entry's transient UI. boundId keys host write-back (not name).
 ---@param id integer
 ---@param graph LibNodeGraph.Graph
 ---@param layout Watchdog.Layout|nil
@@ -94,7 +89,7 @@ function Editor:BindEntry(id, graph, layout, name)
     InvViewer.DestroyAll(self)
 end
 
--- Drop graph pointer; does not Destroy components (Unmount does). Host must flush first.
+-- Flush pending edits before dropping the graph.
 function Editor:Unbind()
     self:closeControlEditor()
     self:closeColorPopup()
@@ -117,18 +112,15 @@ function Editor:IsVisible()
     return self.visible
 end
 
--- Content-local viewport; origin (0,0) is PrettyUI content top-left (no header inset).
 function Editor:viewportRect()
     local win = self.window
     return 0, 0, win.w, math.max(1, win.h)
 end
 
--- Screen → content-local. self.window.x/y must be the live content origin (PrettyUI owns drag).
 function Editor:toLocal(sx, sy)
     return sx - self.window.x, sy - self.window.y
 end
 
--- Inverse of toLocal (paletteCanvas is screen space, unclipped).
 function Editor:toScreen(lx, ly)
     return lx + self.window.x, ly + self.window.y
 end
@@ -140,7 +132,7 @@ function Editor:viewCenterGraph()
     return self.view:ToGraph(w * 0.5, h * 0.5)
 end
 
--- Re-read contentParent's absolute screen rect; nested .x/.y are parent-relative.
+-- Nested component positions are parent-relative; read the absolute content bounds.
 function Editor:syncContentOrigin()
     local p = self.contentParent
     if p == nil then return end
@@ -173,7 +165,6 @@ local function dialogOpen(self)
     return Dialog.depth(self.overlayParent) > 0
 end
 
--- PLUS is fronted last among toolbar buttons; visible tips must follow or Reset view sits under +.
 local function frontToolbarTooltip(btn)
     if btn == nil or btn.tooltip == nil or btn.tooltip.root == nil then return end
     if btn.tooltip.root.hidden == true then return end
@@ -196,7 +187,6 @@ function Editor:FrontOverlayPopups()
     end
 end
 
--- Capture under palette under toolbar under transient editors (overlay above PrettyUI window).
 function Editor:frontOverlayInteractives()
     if dialogOpen(self) then return end
     pcall(function() if self.capture ~= nil then self.capture:MoveToFront() end end)
@@ -217,7 +207,6 @@ function Editor:frontOverlayInteractives()
     end
 end
 
--- Keep absolute-positioned overlay editors glued to content while PrettyUI drags the window.
 function Editor:layoutTransientEditors()
     if self.editing ~= nil and self.editing.field ~= nil
         and self.editing.localX ~= nil and self.editing.localY ~= nil then
@@ -240,13 +229,11 @@ function Editor:layoutTransientEditors()
     end
 end
 
---- Small helpers
-
 local function mousePos()
     if Mouse == nil or Mouse.GetPosition == nil then return nil end
     local ok, pos = pcall(function() return Mouse.GetPosition() end)
     if ok and pos ~= nil then
-        -- Mouse is denser than interface units when InterfaceScale ≠ 100%; native ui.* already scales.
+        -- Mouse coordinates need interface scaling; native UI components already apply it.
         return IfaceScale.ToInterface(pos.x, pos.y)
     end
     return nil
@@ -270,7 +257,6 @@ local function dataCompatible(a, b)
     return a == b or a == "any" or b == "any"
 end
 
--- First pin on `def` that can receive `want`. pinSet from live Registry (client cannot require engine modules).
 ---@param registry LibNodeGraph.Registry
 ---@param def table
 ---@param want { kind: string, direction: string, dataType: string|nil }
@@ -301,7 +287,6 @@ function Editor.FirstCompatiblePin(registry, def, want)
     return firstCompatibleInOrder(pins, pinOrder), nil
 end
 
--- field.content / contentQuantity; pcall because the field can be mid-teardown.
 local function fieldContent(field)
     local raw = ""
     pcall(function() raw = field.content or "" end)
@@ -310,13 +295,11 @@ local function fieldContent(field)
     return raw, quantity
 end
 
--- Enum member by name, else the raw string (newer ui.Hook keys exist in-client but not in stubs).
 local function enumv(tbl, name)
     if tbl ~= nil and tbl[name] ~= nil then return tbl[name] end
     return name
 end
 
--- True when ONCONTENTCHANGED cause is submit / focus loss / esc (enum value or raw string).
 local SUBMIT_CAUSES = {
     SUBMIT = true, SUBMIT_ON_ESCAPE = true, SUBMIT_ON_FOCUS_LOSS = true,
 }
@@ -339,7 +322,6 @@ local function safeButtonStyle()
     return nil
 end
 
--- Combo stylesheet; DROPDOWN then BUTTON if COMBO_DEFAULT is missing (otherwise ComboField is invisible).
 local function safeComboStyle()
     if id ~= nil and id.StyleSheet ~= nil then
         return id.StyleSheet.COMBO_DEFAULT or id.StyleSheet.DROPDOWN_DEFAULT
@@ -361,7 +343,6 @@ local function titleStrip(win)
     return win.x - border, win.y - headerH, win.w + 2 * border, headerH
 end
 
--- Right-edge title-strip slot, left of close + Maximize.
 local function titleRightSlot(win, w, h)
     w = w or Theme.TOOLBAR_BTN
     h = h or Theme.TOOLBAR_BTN
@@ -371,7 +352,6 @@ local function titleRightSlot(win, w, h)
     return x, y
 end
 
--- Palette-from-plus hangs off the bottom of this.
 local function addNodeScreenPos(win, bs)
     bs = bs or Theme.TOOLBAR_BTN
     local titleX, titleY, _, headerH = titleStrip(win)
@@ -380,7 +360,6 @@ local function addNodeScreenPos(win, bs)
     return titleX + pad + bs + pad + bs + pad, btnY, bs
 end
 
--- Authoritative placeholder type key; no string fallback (would drift).
 function Editor:unknownTypeKey()
     return LibNodeGraph.UNKNOWN_TYPE
 end
@@ -390,7 +369,6 @@ function Editor:isPlaceholderNode(nodeId)
     return node ~= nil and node.typeKey == self:unknownTypeKey()
 end
 
--- Missing type key from node.unknown (not in GetNodes projection).
 function Editor:unknownTypeOf(nodeId)
     local node = self.graph.nodes[nodeId]
     if node == nil or node.unknown == nil then return nil end
@@ -398,7 +376,6 @@ function Editor:unknownTypeOf(nodeId)
 end
 
 function Editor:meta(nodeId, typeKey)
-    -- Placeholder title is the missing type, not the reserved key.
     if typeKey == self:unknownTypeKey() then
         return { title = "Unknown: " .. (self:unknownTypeOf(nodeId) or "?"),
             category = nil, placeholder = true }
@@ -411,7 +388,6 @@ end
 function Editor:posOf(nodeId)
     local p = self.layout[nodeId]
     if p == nil then
-        -- Nodes with no assigned position get a cascading default so nothing hides at 0,0.
         local n = 0
         for _ in pairs(self.layout) do n = n + 1 end
         p = { x = 60 + n * 40, y = 60 + n * 40 }
@@ -431,7 +407,6 @@ function Editor:bringToFront(nodeId)
 end
 
 function Editor:buildGeoms()
-    -- Input pins that already have an incoming Connection get a wire, not a Control box.
     local connectedIn = {}
     for _, c in ipairs(self.graph:GetConnections()) do
         connectedIn[c.toNode] = connectedIn[c.toNode] or {}
@@ -445,7 +420,6 @@ function Editor:buildGeoms()
         local pos = self:posOf(n.id)
         local pins, opts
         if n.typeKey == unknownKey then
-            -- Placeholder: display-only stubs from touching wires; no interactive geom.
             pins = Placeholder.Stubs(self.graph, n.id)
             opts = { placeholder = true }
         else
@@ -463,12 +437,9 @@ function Editor:buildGeoms()
         end
         local geom = Node.BuildGeometry(pins, pos.x, pos.y, Theme.NODE_WIDTH, opts)
         geom.typeKey = n.typeKey
-        -- Composite controls share one stored table; field boxes show one axis.
         for _, ctrl in ipairs(geom.controls) do
             ctrl.value = self.graph:GetControl(n.id, ctrl.pinName)
-            -- Nil stored Control shows the pin default (value the node would actually run with).
             if ctrl.value == nil then ctrl.value = ctrl.default end
-            -- Capture Controls show "Cancel" while this pin's Capture Arm is live.
             if ctrl.kind == "capture" then
                 ctrl.captureArmed = self:isCaptureArmed(n.id, ctrl.pinName)
             end
@@ -493,9 +464,7 @@ function Editor:buildGeoms()
     self.nodeOrder = kept
 end
 
---- Hit-testing
-
--- Front-to-back; a Body with no hit occludes pins/controls behind it.
+-- A node body blocks hits on pins and controls behind it.
 local function hitFrontToBack(self, sx, sy, tryHit)
     for i = #self.nodeOrder, 1, -1 do
         local id = self.nodeOrder[i]
@@ -511,7 +480,6 @@ local function hitFrontToBack(self, sx, sy, tryHit)
     return nil
 end
 
--- Placeholder stubs are display-only (never wire endpoints).
 function Editor:pinAt(sx, sy)
     return hitFrontToBack(self, sx, sy, function(id, geom)
         if geom.placeholder then return nil end
@@ -569,7 +537,6 @@ function Editor:connectionInto(nodeId, pinName)
     return nil
 end
 
--- Remove node; clear layout/geom/z-order/selection now so later hit-tests in this press stay consistent.
 function Editor:deleteNode(nodeId)
     self.graph:RemoveNode(nodeId)
     self.layout[nodeId] = nil
@@ -583,11 +550,7 @@ function Editor:deleteNode(nodeId)
     end
 end
 
---- Interaction
-
--- Only from ONCLICK (real mouse-DOWN on this layer). Never ONHOLD: that fires when a press
--- started elsewhere is held over us, and that press's ONRELEASE never routes here - starting
--- a gesture from it strands the drag stuck-to-cursor. pressed-guard still blocks duplicate ONCLICK.
+-- ONHOLD can come from a press elsewhere whose release never reaches this layer.
 function Editor:beginPress()
     if dialogOpen(self) then return end
     if self.pressed or not self.visible then return end
@@ -597,21 +560,19 @@ function Editor:beginPress()
     local lx, ly = self:toLocal(mx, my)
     self.mouse.x, self.mouse.y = lx, ly
 
-    -- Palette is modal; hit-tests in SCREEN space (paletteCanvas), so pass raw mouse not toLocal.
+    -- The palette uses screen coordinates.
     if self.palette.open then
         if self.editing ~= nil then self:closeControlEditor() end
         self:handlePaletteClick(mx, my)
         return
     end
 
-    -- Color popup is modal but some parts drag (handleColorPopupClick expands capture).
     if self.colorPopup.open then
         if self.editing ~= nil then self:closeControlEditor() end
         self:handleColorPopupClick(lx, ly)
         return
     end
 
-    -- Click-away commits a pin editor, except Mode strip (ComboField parks the editor until SetMode).
     local onModeStrip = self:modeStripAt(lx, ly)
     if self.editing ~= nil then
         if self.editing.kind == "nodeMode" then
@@ -629,11 +590,9 @@ function Editor:beginPress()
         and math.abs(ly - self.lastClickY) <= Theme.DOUBLECLICK_DIST
     self.lastClickTick, self.lastClickX, self.lastClickY = self.tick, lx, ly
 
-    -- Grow capture full-screen for the gesture so release still reaches us outside content.
     self.pressed = true
     self:expandCapture()
 
-    -- Header delete isn't a drag; unwind pressed/capture before return.
     local hitClose = self:closeAt(lx, ly)
     if hitClose ~= nil then
         self.pressed = false
@@ -642,7 +601,7 @@ function Editor:beginPress()
         return
     end
 
-    -- Mode strip: Graph:SetMode, not a Control. Before pin glyphs so the dropdown isn't a wire start.
+    -- Check the mode dropdown before pins so clicking it cannot start a wire.
     local hitMode = self:modeStripAt(lx, ly)
     if hitMode ~= nil then
         self.pressed = false
@@ -659,7 +618,6 @@ function Editor:beginPress()
         return
     end
 
-    -- Pin Control.Press; not a drag, unwind gesture. Box is clear of the pin glyph.
     local hitCtrl = self:controlAt(lx, ly)
     if hitCtrl ~= nil then
         self.pressed = false
@@ -703,13 +661,12 @@ function Editor:beginPress()
     self.mode = "pan"
 end
 
--- Pressing a connected input grabs that Connection (disconnect + re-anchor to original output).
 function Editor:beginWire(hit)
     self.mode = "wire"
 
     if hit.entry.direction == "in" then
         local conn = self:connectionInto(hit.nodeId, hit.entry.name)
-        -- Don't grab a wire whose source is a placeholder stub: re-anchoring would fail to reconnect.
+        -- Placeholder pins cannot reconnect a grabbed wire.
         if conn ~= nil and not self:isPlaceholderNode(conn.fromNode) then
             self.graph:Disconnect(conn.id)
             local srcGeom = self.geoms[conn.fromNode]
@@ -736,7 +693,6 @@ function Editor:update()
     end
     self.tick = self.tick + 1   -- advances even without a cursor, for double-click timing
     self:syncContentOrigin()
-    -- Resting capture tracks live content rect while PrettyUI drags; skip while expanded.
     if self.visible and not self.pressed and not self.palette.open then
         self:positionCapture()
     end
@@ -757,7 +713,6 @@ function Editor:update()
             self.colorPopup:ApplyDrag(self.colorDragPart, lx, ly)
             self:commitColorPopupValue()
         elseif self.mode == "palettescroll" then
-            -- Palette hit-tests in screen space; scrub with raw mouse (no toLocal).
             self.palette:ScrollToY(my)
         end
     end
@@ -779,11 +734,9 @@ function Editor:endPress()
     self.dragNodeId = nil
     self.colorDragPart = nil
     self.palette.scrollDragging = false
-    -- Shrink capture unless this release opened the Palette; closePalette restores later.
     if not self.palette.open then self:positionCapture() end
 end
 
--- Identical wire toggles off; data input replaces occupant; Connect rejection is logged, not thrown.
 function Editor:linkPins(outNode, outPin, inNode, inPin, isData)
     local dup = self.graph:FindConnection(outNode, outPin, inNode, inPin)
     if dup ~= nil then
@@ -801,7 +754,6 @@ function Editor:linkPins(outNode, outPin, inNode, inPin, isData)
     return id ~= nil
 end
 
--- Connect if legal. Miss inside Viewport → filtered Palette; miss outside discards (grabbed conn stays removed).
 function Editor:commitWire()
     local mx, my = self.mouse.x, self.mouse.y
     local target = self:pinAt(mx, my)
@@ -834,14 +786,10 @@ function Editor:commitWire()
         inEnd.entry.kind == "data")
 end
 
---- Palette
-
--- Unfiltered palette. `opts.anchorGX/GY` / `centerOnAnchor` override placement; expands capture full-screen.
 ---@param lx number
 ---@param ly number
 ---@param opts { anchorGX: number, anchorGY: number, centerOnAnchor: boolean }|nil
 function Editor:openPaletteUnfiltered(lx, ly, opts)
-    -- Toolbar + is a real Button (bypasses beginPress's colorPopup-modal check).
     self:closeColorPopup()
     local gx, gy
     if opts ~= nil and opts.anchorGX ~= nil and opts.anchorGY ~= nil then
@@ -870,7 +818,6 @@ function Editor:openPaletteFromPlus()
     })
 end
 
--- Palette filtered to types that can receive `source`; first matching pin (any Mode) is auto-connect.
 function Editor:openPaletteFiltered(lx, ly, source)
     local gx, gy = self.view:ToGraph(lx, ly)
     local scx, scy = self:toScreen(lx, ly)
@@ -890,9 +837,7 @@ function Editor:closePalette()
     if not self.pressed then self:positionCapture() end
 end
 
--- Palette click in SCREEN coords (matches paletteCanvas). beginPress passes raw mouse, not toLocal.
 function Editor:handlePaletteClick(mx, my)
-    -- Scrollbar gutter is a real drag; checked before RowAt.
     if self.palette:ScrollbarAt(mx, my) then
         self.pressed = true
         self:expandCapture()
@@ -907,10 +852,8 @@ function Editor:handlePaletteClick(mx, my)
     elseif not self.palette:Contains(mx, my) then
         self:closePalette()
     end
-    -- Header row / inner padding: ignore, keep Palette open.
 end
 
--- Add node at palette anchor; auto-connect if drag-to-create. centerOnAnchor centers the body.
 function Editor:placeFromPalette(row)
     local anchorGX, anchorGY = self.palette.anchorGX, self.palette.anchorGY
     local centerOnAnchor = self.palette.centerOnAnchor
@@ -960,7 +903,7 @@ function Editor:applyNodeMode(nodeId, key)
     return true
 end
 
--- Hide the pin editor without Destroy so a cancelled reconstruct can restore it.
+-- Keep the field alive so cancelling a mode change can restore it.
 function Editor:parkControlEditor()
     local e = self.editing
     if e == nil or e.kind == "nodeMode" then return end
@@ -996,7 +939,6 @@ function Editor:dropVanishedParkedOrEditing(nodeId)
     end
 end
 
--- ComboField over the Mode strip; labels from ModeDropdownChoices (suffix on collision).
 function Editor:openNodeModeDropdown(nodeId)
     local geom = self.geoms[nodeId]
     if geom == nil or geom.modeStrip == nil then return end
@@ -1029,12 +971,11 @@ end
 function Editor:onScroll(delta)
     if dialogOpen(self) then return end
     if delta == nil or delta == 0 then return end
-    -- Palette open: wheel scrolls the list instead of zooming.
     if self.palette.open then
         self.palette:Scroll(delta)
         return
     end
-    -- Transient editors / color popup are fixed screen rects; close them before zoom.
+    -- Native fields and the color popup do not scale with the view.
     self:closeViewTransients()
     local mx, my = mousePos()
     local lx, ly
@@ -1048,13 +989,11 @@ function Editor:closeViewTransients()
     if self.colorPopup.open then self:closeColorPopup() end
 end
 
--- Wheel leaves the Palette open; slider and # close it first.
 function Editor:dismissPaletteThenViewChange()
     if self.palette.open then self:closePalette() end
     self:closeViewTransients()
 end
 
--- Lattice index about the Viewport center (wheel zooms about the cursor).
 ---@param index integer
 function Editor:applyZoomIndex(index)
     self:dismissPaletteThenViewChange()
@@ -1067,7 +1006,7 @@ function Editor:applyZoomIndex(index)
     self:syncZoomSlider()
 end
 
--- SetValue(..., false) so wheel/reset don't re-enter onZoomSliderChanged.
+-- Suppress the slider callback to avoid re-entering the zoom handler.
 function Editor:syncZoomSlider()
     local slider = self.zoomSlider
     if slider == nil then return end
@@ -1088,8 +1027,6 @@ function Editor:onResetView()
     self:resetView()
 end
 
---- Control commit
-
 function Editor:setControl(nodeId, pinName, value)
     pcall(function() self.graph:SetControl(nodeId, pinName, value) end)
     if self.runtime ~= nil then
@@ -1097,9 +1034,6 @@ function Editor:setControl(nodeId, pinName, value)
     end
 end
 
---- Test button
-
--- Fire exec-in pin live via Graph:FireInput; pcall so a node error cannot crash the frame.
 function Editor:fireTestPin(nodeId, pinName)
     local ok, err = pcall(function() self.graph:FireInput(nodeId, pinName) end)
     if not ok and log ~= nil then
@@ -1107,9 +1041,6 @@ function Editor:fireTestPin(nodeId, pinName)
     end
 end
 
---- Marker Capture Arm
-
--- Arm `primary`; cancel `other`; same-control re-click cancels.
 ---@param primary { IsArmed: fun(self): boolean, Cancel: fun(self), Arm: fun(self, any, string, function), nodeId: any, pinName: string|nil }|nil
 ---@param other { IsArmed: fun(self): boolean, Cancel: fun(self) }|nil
 ---@param nodeId any
@@ -1160,13 +1091,8 @@ function Editor:isCaptureArmed(nodeId, pinName)
     return false
 end
 
-
---- Color popup
-
--- Parts that start a drag (PartAt keys). Hex/close/other are clicks.
 local COLOR_DRAG_PARTS = { sv = true, hue = true, r = true, g = true, b = true, a = true }
 
--- Open below the swatch. `codec` is the swatch hex format/parse table (popup has no Control knowledge).
 ---@param nodeId integer
 ---@param ctrl table
 ---@param codec table
@@ -1186,7 +1112,6 @@ function Editor:closeColorPopup()
     self.colorPopup:Close()
 end
 
--- Modal popup click: drag parts expand capture; hex mounts InputField; close/outside dismiss.
 function Editor:handleColorPopupClick(lx, ly)
     local cp = self.colorPopup
     local part = cp:PartAt(lx, ly)
@@ -1211,7 +1136,6 @@ function Editor:handleColorPopupClick(lx, ly)
     if not cp:Contains(lx, ly) then
         self:closeColorPopup()
     end
-    -- part == "other" or nil (Draw hasn't run yet): stay open.
 end
 
 function Editor:commitColorPopupValue()
@@ -1220,7 +1144,6 @@ function Editor:commitColorPopupValue()
     self:setControl(cp.nodeId, cp.pinName, cp:Value())
 end
 
--- Transient InputField over hex row; filter NONE (codec strips non-hex on commit).
 function Editor:openColorHexEditor()
     self:closeColorHexEditor()
     if self:interactiveParent() == nil or ui == nil then return end
@@ -1228,7 +1151,6 @@ function Editor:openColorHexEditor()
     local r = cp.rect and cp.rect.hex
     if r == nil then return end
 
-    -- Popup rect is content-local; mountInputField converts to absolute for the overlay.
     local field = self:mountInputField(r.x, r.y, r.w, r.h, "NONE", 8,
         cp:Format(cp:Value()),
         function(_, cause, newContent) self:onColorHexContent(cause, newContent) end)
@@ -1240,7 +1162,6 @@ function Editor:openColorHexEditor()
     pcall(function() field:SetFocus() end)
 end
 
--- Live-parse hex via codec (unparsable is no-op); close field on submit, not the whole popup.
 function Editor:onColorHexContent(cause, _newContent)
     if self.colorHexField == nil then return end
     local raw = ""
@@ -1259,7 +1180,7 @@ function Editor:closeColorHexEditor()
     self.colorHexLocalW, self.colorHexLocalH = nil, nil
 end
 
--- Esc: color popup, marker capture, then goBack. Does not dismiss dialogs (client pause menu).
+-- Leave Esc available to the client pause menu while a dialog is open.
 function Editor:onEscape()
     if self.colorPopup.open then
         self:closeColorPopup()
@@ -1278,7 +1199,6 @@ function Editor:onEscape()
     self:goBack()
 end
 
--- Content-local rect for a transient field over `ctrl` (native font is fixed pixels, not View zoom).
 ---@param geom table
 ---@param ctrl table
 ---@return number px, number py, number sw, number sh
@@ -1290,8 +1210,6 @@ function Editor:controlEditRect(geom, ctrl)
     return sx, sy + (boxH - sh) * 0.5, sw, sh
 end
 
---- Pin Control host seam
-
 ---@class ControlHost
 ---@field GetControl fun(self: ControlHost): any
 ---@field Commit fun(self: ControlHost, value: any)
@@ -1300,12 +1218,10 @@ end
 ---@field OpenColorPopup fun(self: ControlHost, codec: table)
 ---@field ArmCapture fun(self: ControlHost, kind: string)
 
--- Pin Control host. ComboField selection is by label, never id.
 ---@return ControlHost
 function Editor:controlHost(nodeId, ctrl)
     local editor = self
     return {
-        -- Raw stored value (no default); axis RMW seeds a fresh table from nil.
         GetControl = function(_)
             return editor.graph:GetControl(nodeId, ctrl.pinName)
         end,
@@ -1315,7 +1231,7 @@ function Editor:controlHost(nodeId, ctrl)
         MountField = function(_, mctrl, opts, onChange)
             editor:mountControlField(ctrl.pinControl, nodeId, mctrl, opts, onChange)
         end,
-        -- Selection is by label, never id (ComboField re-sorts and reassigns ids).
+        -- ComboField reorders entries and reassigns IDs; select by label.
         MountDropdown = function(_, mctrl, opts, onSelect)
             editor:mountControlDropdown(ctrl.pinControl, nodeId, mctrl, opts, onSelect)
         end,
@@ -1363,7 +1279,7 @@ end
 ---@param onSelect fun(label: string)
 function Editor:mountControlDropdown(pinControl, nodeId, ctrl, opts, onSelect)
     if self.editing ~= nil then
-        -- Remounting the Mode ComboField must not unpark the pin editor parked under it.
+        -- Remounting the mode dropdown must leave the pin editor parked.
         self:closeControlEditor({ skipUnpark = ctrl.kind == "nodeMode" })
     end
     local parent = self:interactiveParent()
@@ -1380,7 +1296,7 @@ function Editor:mountControlDropdown(pinControl, nodeId, ctrl, opts, onSelect)
         field.clickthrough = false
         field:SetPos(ax, ay)
         field:SetSize(sw, sh)
-        -- ComboField re-sorts alphabetically and reassigns ids; match selection by label, not id.
+        -- ComboField reorders entries and reassigns IDs; select by label.
         for i, label in ipairs(opts.labels or {}) do
             field:Add(label, i)
         end
@@ -1402,7 +1318,6 @@ function Editor:mountControlDropdown(pinControl, nodeId, ctrl, opts, onSelect)
     pcall(function() field:SetFocus() end)
 end
 
--- Hand selectedLabel (not selectedID) to onSelect; dropdown has no onChange so plain close is a no-op.
 function Editor:onControlDropdownSelect()
     local e = self.editing
     if e == nil then return end
@@ -1412,9 +1327,6 @@ function Editor:onControlDropdownSelect()
     self:closeControlEditor()
 end
 
---- Inline Control editing
-
--- Overlay InputField in absolute screen space from content-local (px,py).
 function Editor:mountInputField(px, py, sw, sh, filterMode, maxLen, initialContent, onChanged)
     local parent = self:interactiveParent()
     if parent == nil then return nil end
@@ -1435,7 +1347,6 @@ function Editor:mountInputField(px, py, sw, sh, filterMode, maxLen, initialConte
     return field
 end
 
--- Pin Control onChange(raw, quantity). Dropdown sessions have no onChange (commit on ONSELECTIONCHANGED).
 function Editor:commitField()
     local e = self.editing
     if e == nil then return end
@@ -1445,7 +1356,6 @@ function Editor:commitField()
     end
 end
 
--- ONCONTENTCHANGED: live-write every keystroke; close on a submit/focus-loss cause.
 function Editor:onControlContent(cause, _newContent)
     if self.editing == nil then return end
     self:commitField()
@@ -1463,8 +1373,6 @@ function Editor:closeControlEditor(opts)
         self:unparkControlEditor()
     end
 end
-
---- Drawing
 
 function Editor:drawBackground()
     local vx, vy, vw, vh = self:viewportRect()
@@ -1534,7 +1442,7 @@ function Editor:draw()
     self:drawBackground()
     self:drawConnections()
 
-    -- AddLine / AddTriangle are not scissored by the Canvas component.
+    -- Canvas does not clip AddLine or AddTriangle.
     local clipped = Clip.Wrap(self.canvas, vx, vy, vw, vh)
 
     for _, id in ipairs(self.nodeOrder) do
@@ -1552,13 +1460,11 @@ function Editor:draw()
 
     self:drawPendingWire()
 
-    -- Color popup last on the content Canvas, clamped to the Viewport.
     if self.colorPopup.open then
         self.colorPopup:Draw(clipped, vx, vy, vw, vh, self.mouse.x, self.mouse.y,
             { hexEditing = self.colorHexField ~= nil })
     end
 
-    -- Palette draws on its own full-screen Canvas in screen space (content Canvas clips).
     if self.paletteCanvas ~= nil then
         pcall(function() self.paletteCanvas:Clear() end)
         if self.palette.open then
@@ -1581,13 +1487,10 @@ function Editor:drawZoomTick()
     local n = #View.Rungs()
     local t = (View.RungIndex(1.0) - 1) / (n - 1)
     local centerX = math.floor(t * (w - 1) + 0.5) - 4
-    -- Use a filled rectangle: native line thickness expands on both sides.
+    -- A native line expands on both sides; use a rectangle for the exact marker width.
     c:AddRectangle(centerX - 1, 2, 2, h - 4, Theme.Vec4(Theme.COL_ZOOM_TICK))
 end
 
---- Visibility
-
--- Full-screen size from overlayParent; content Canvas is content-sized.
 function Editor:screenSize()
     local w, h = 1920, 1080
     local p = self.overlayParent
@@ -1600,7 +1503,6 @@ function Editor:screenSize()
     return w, h
 end
 
--- Resting capture = live content screen rect so title-drag/close stay clickable.
 function Editor:positionCapture()
     if self.capture == nil then return end
     local win = self.window
@@ -1610,7 +1512,6 @@ function Editor:positionCapture()
     end)
 end
 
--- Full-screen capture during drag/open palette; front overlay so PrettyUI doesn't bury it.
 function Editor:expandCapture()
     if self.capture == nil then return end
     pcall(function()
@@ -1620,11 +1521,9 @@ function Editor:expandCapture()
         self.capture:SetPos(0, 0)
         self.capture:SetSize(0, 0, 1.0, 1.0)
     end)
-    -- Keep Back/+ (and any open field) above the expanded capture.
     self:frontOverlayInteractives()
 end
 
--- Re-front overlay children after another overlay jumped ahead. No-op while hidden.
 function Editor:RaiseToFront()
     if not self.visible then return end
     pcall(function()
@@ -1635,8 +1534,7 @@ function Editor:RaiseToFront()
     self:frontOverlayInteractives()
 end
 
--- PrettyUI tooltips parent to the overlay, not the SpriteButton. Hiding the button
--- does not fire ONMOUSELEAVE, so a hovered Back tooltip would stick over the manager.
+-- Hiding a button does not fire ONMOUSELEAVE or hide its overlay tooltip.
 local function hideToolbarButton(btn, hidden)
     if btn == nil then return end
     if btn.root ~= nil then
@@ -1666,7 +1564,6 @@ local function dismissToolbarTooltip(btn)
     end
 end
 
--- Dismiss popups/gestures without flipping self.visible (F8 must keep pan/zoom).
 function Editor:OnShellHide()
     self.pressed = false
     self.mode = "idle"
@@ -1682,7 +1579,6 @@ function Editor:OnShellHide()
     dismissToolbarTooltip(self.backButton)
 end
 
--- Default pan/zoom on Mount and each open (avoids irrecoverable off-screen pan).
 function Editor:resetView()
     self.view.panX = 0
     self.view.panY = 0
@@ -1736,9 +1632,6 @@ function Editor:Toggle()
     self:SetVisible(not self.visible)
 end
 
---- Mount / unmount
-
--- Overlay widgets sit on the PrettyUI title strip. Stop the right cluster before close + Maximize.
 function Editor:layoutToolbar()
     local win = self.window
     local pad = 6
@@ -1776,7 +1669,6 @@ function Editor:layoutToolbar()
     end
 end
 
--- Canvas under contentParent; toolbar/capture/palette under overlayParent.
 ---@param contentParent ui.ComponentCollection
 ---@param overlayParent ui.ComponentCollection
 function Editor:Mount(contentParent, overlayParent)
@@ -1802,11 +1694,10 @@ function Editor:Mount(contentParent, overlayParent)
     end
     self.canvas = canvas
     self.canvas:SetPos(0, 0)
-    -- Fill the content parent; relative anchors track host resize.
     self.canvas:SetSize(0, 0, 1.0, 1.0)
     self.canvas.clickthrough = true
 
-    -- Invisible capture on the overlay (not under content) so it can grow true full-screen.
+    -- Mount capture on the overlay so it can expand beyond the content bounds.
     local okCap, capture = pcall(function() return ui.Button.new(overlayParent) end)
     if okCap and capture ~= nil then
         self.capture = capture
@@ -1814,7 +1705,7 @@ function Editor:Mount(contentParent, overlayParent)
         self.capture.clickthrough = false
     end
 
-    -- Palette full-screen Canvas on the overlay so it isn't clipped to content.
+    -- Mount the palette on the overlay to avoid content clipping.
     local okPal, paletteCanvas = pcall(function() return ui.Canvas.new(overlayParent) end)
     if okPal and paletteCanvas ~= nil then
         self.paletteCanvas = paletteCanvas
@@ -1823,13 +1714,10 @@ function Editor:Mount(contentParent, overlayParent)
         self.paletteCanvas.clickthrough = true
     end
 
-    -- Toolbar on overlay above capture; contentParent children cannot out-rank the mux overlay.
     self:mountToolbar(overlayParent)
 
     self:positionCapture()
 
-    -- Gesture ONLY on ONCLICK. Never subscribe ONHOLD: a press that began elsewhere fires
-    -- ONHOLD when dragged over us, and that foreign press's ONRELEASE never comes back here.
     if self.capture ~= nil then
         self.capture:Subscribe(ui.Hook.ONCLICK, function() self:beginPress() end)
         self.capture:Subscribe(ui.Hook.ONRELEASE, function() self:endPress() end)
@@ -1852,7 +1740,7 @@ function Editor:mountToolbar(overlayParent)
         local i0 = View.RungIndex(self.view.zoom) - 1
         slider:Setup(0, n - 1, i0, 1, 1)
         slider.notchSprite.alpha = 0
-        -- labelsText.alpha = 0 paints the numerals black; font 0 skips drawing them.
+        -- Zero alpha paints these labels black; font 0 prevents drawing.
         slider.labelsText.font = 0
         self.zoomSlider = slider
         slider:Subscribe(ui.Hook.ONSELECTIONCHANGED, function()
@@ -1883,7 +1771,6 @@ function Editor:mountToolbar(overlayParent)
     self:layoutToolbar()
 end
 
--- Host onBack if wired; else hide. Nav owner flushes/unbinds.
 function Editor:goBack()
     if self.onBack ~= nil then
         pcall(self.onBack)
