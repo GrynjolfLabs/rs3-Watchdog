@@ -121,16 +121,22 @@ function TestCompare:testChangingOperationPreservesWiredInputs()
     luaunit.assertFalse(self.graph:GetLastValue(target, "result"))
 end
 
-function TestCompare:testOnlyCompareAppearsInPalette()
+function TestCompare:testComparisonsAndBooleanOperatorsShareLogicGroup()
+    require("boolean").Register(self.registry)
     local palette = Palette.new()
     palette:Open(self.registry, nil, { screenX = 0, screenY = 0, anchorGX = 0, anchorGY = 0 })
     local comparisonKeys = {}
     for _, row in ipairs(palette.rows) do
-        if not row.header and row.category == "compare" then
+        luaunit.assertNotEquals(row.category, "compare")
+        luaunit.assertNotEquals(row.category, "boolean")
+        if row.header and row.category == "logic" then
+            luaunit.assertEquals(row.label, "Logic")
+        end
+        if not row.header and row.category == "logic" then
             comparisonKeys[#comparisonKeys + 1] = row.typeKey
         end
     end
-    luaunit.assertEquals(comparisonKeys, { "std.compare" })
+    luaunit.assertItemsEquals(comparisonKeys, { "std.compare", "std.and", "std.or", "std.not", "std.xor" })
 end
 
 return {}
