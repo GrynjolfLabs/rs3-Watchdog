@@ -180,7 +180,6 @@ local function frontToolbarTooltip(btn)
     btn.tooltip.root:MoveToFront()
 end
 
--- Visible toolbar and inventory tooltips share the overlay.
 function Editor:FrontOverlayTooltips()
     frontToolbarTooltip(self.renameButton)
     frontToolbarTooltip(self.backButton)
@@ -189,8 +188,6 @@ function Editor:FrontOverlayTooltips()
     InvViewer.FrontTooltips(self)
 end
 
--- Chrome is raised at the end of every frame. Restore the modal Palette's
--- capture as well as its artwork so the resize grip cannot steal menu clicks.
 function Editor:FrontOverlayPopups()
     if self.palette.open then
         self:frontOverlayInteractives()

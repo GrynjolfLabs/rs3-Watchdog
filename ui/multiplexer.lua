@@ -9,7 +9,7 @@ local Resize = require("ui/window_resize")
 ---@field title string|fun():string         # window title while this surface is top
 ---@field SetVisible fun(self, v: boolean)
 ---@field OnShellHide fun(self)|nil         # optional: shell tucked (F8/Close); stack kept
----@field FrontOverlayPopups fun(self)|nil  # optional: raise modal popups and tips after chrome restack
+---@field FrontOverlayPopups fun(self)|nil
 
 --- Minimal window seam Multiplexer drives (prettyui.Window or a test fake).
 ---@class Watchdog.MuxWindow
@@ -447,8 +447,7 @@ function Multiplexer:RaiseToFront()
     self:SyncChrome()
 end
 
--- Title-drag raises the window over overlay chrome; re-front overlay + resize each frame.
--- Modal popups and overlay tips must follow the resize/maximize controls.
+-- Raise popups after the resize handle so it cannot cover them or intercept clicks.
 function Multiplexer:SyncChrome()
     if self.window == nil or not self._visible then return end
     if self._overlay ~= nil and self._overlay.MoveToFront ~= nil then
