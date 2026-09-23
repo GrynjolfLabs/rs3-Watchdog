@@ -123,28 +123,26 @@ end)
 local function seedDemo()
     local graph = LibNodeGraph.NewGraph(registry)
 
-    local chatNode = graph:AddNode("trigger.game_message",
-        { contains = { needle = "Hello", mode = "substring" } })
-    local logNode  = graph:AddNode("action.log")
-    local addNode  = graph:AddNode("std.add", { a = 2, b = 3 })
-    local mulNode  = graph:AddNode("std.multiply", { a = 4, b = 5 })
+    local tickNode = graph:AddNode("trigger.server_logic", { interval = 1 })
+    local counterNode = graph:AddNode("std.counter", { step = 1, start = 0 })
+    local infoNode = graph:AddNode("action.infobox", { title = "", icon = 17127, dismissWhenEmpty = false })
+    local compareNode = graph:AddNode("std.greaterorequal", { a = 0, b = 4 })
+    local branchNode = graph:AddNode("std.branch", { condition = false })
 
-    local function tryConnect(fromN, fromP, toN, toP)
-        local id, reason = graph:Connect(fromN, fromP, toN, toP)
-        if id == nil and log ~= nil then
-            log("Watchdog: demo connect failed - " .. tostring(reason))
-        end
-    end
-
-    tryConnect(chatNode, "out", logNode, "in")
-    tryConnect(chatNode, "message", logNode, "message")
-    tryConnect(addNode, "result", mulNode, "a")
+    assert(graph:Connect(tickNode, "out", counterNode, "in"))
+    assert(graph:Connect(counterNode, "count", infoNode, "value"))
+    assert(graph:Connect(counterNode, "count", compareNode, "a"))
+    assert(graph:Connect(counterNode, "out", branchNode, "in"))
+    assert(graph:Connect(counterNode, "out", infoNode, "update"))
+    assert(graph:Connect(compareNode, "result", branchNode, "condition"))
+    assert(graph:Connect(branchNode, "true", counterNode, "reset"))
 
     local layout = {
-        [chatNode] = { x = 80,  y = 90 },
-        [logNode]  = { x = 460, y = 110 },
-        [addNode]  = { x = 80,  y = 360 },
-        [mulNode]  = { x = 460, y = 380 },
+        [tickNode] = { x = 7, y = 15 },
+        [counterNode] = { x = 276, y = 116 },
+        [infoNode] = { x = 607, y = 94 },
+        [compareNode] = { x = 46, y = 356 },
+        [branchNode] = { x = 363, y = 363 },
     }
 
     return graph, layout
@@ -163,9 +161,10 @@ do
     if #restored == 0 then
         local graph, layout = seedDemo()
         local id = Store.MintId(document)
-        Store.InsertEntry(document, Store.NewAlertEntry(id, "default", graph, layout, true))
+        local name = "Tick Counter (Example alert)"
+        Store.InsertEntry(document, Store.NewAlertEntry(id, name, graph, layout, true))
         Store.Save(document)
-        restored = { { id = id, name = "default", graph = graph, layout = layout, enabled = true } }
+        restored = { { id = id, name = name, graph = graph, layout = layout, enabled = true } }
     end
 end
 

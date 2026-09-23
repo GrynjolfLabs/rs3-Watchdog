@@ -10,7 +10,7 @@ local Export = {}
 Export.SCHEMA_VERSION = 1
 
 -- Written on every export; never read, never branched on.
-Export.PLUGIN_VERSION = "0.1.0"
+Export.PLUGIN_VERSION = "0.3.1"
 
 -- ui.InputField hard cap. Guarded as UTF-8 bytes with no margin.
 Export.MAX_BYTES = 2500

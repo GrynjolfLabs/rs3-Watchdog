@@ -1,6 +1,6 @@
 {
   "name": "Watchdog",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "requiredDependencies": {
     "LibNodeGraph": 6398478,
     "LibNodeGraphStd": 6398482,
