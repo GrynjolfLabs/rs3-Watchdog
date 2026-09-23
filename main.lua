@@ -58,7 +58,6 @@ runtime.toast = ToastStack.new(runtime.effects, {
 
 local registry = LibNodeGraph.NewRegistry()
 LibNodeGraphStd.Register(registry)
-require("nodes/compare").Register(registry)
 require("nodes/triggers/game_message").Register(registry, runtime)
 require("nodes/triggers/player_chat").Register(registry, runtime)
 require("nodes/triggers/logic").Register(registry, runtime)
