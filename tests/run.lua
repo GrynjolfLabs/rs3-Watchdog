@@ -12,8 +12,9 @@ local testsDir = scriptDir()
 local rootDir = testsDir .. "../"
 
 -- runtime.lua and the node files are exercised against a real Graph/Registry, so
--- LibNodeGraph (a sibling deployed folder, see CLAUDE.md) must be on the path too.
+-- LibNodeGraph and LibNodeGraphStd must be available as sibling folders or on LUA_PATH.
 package.path = rootDir .. "?.lua;" .. testsDir .. "?.lua;" .. rootDir .. "../LibNodeGraph/?.lua;" .. package.path
+package.path = rootDir .. "../LibNodeGraphStd/?.lua;" .. package.path
 
 local luaunit = require("luaunit")
 
@@ -43,6 +44,7 @@ require("test_widget_draw")
 require("test_coordgrid_control")
 require("test_scalar_control")
 require("test_enum_control")
+require("test_compare")
 require("test_matcher_control")
 require("test_swatch_control")
 require("test_capture_control")

@@ -63,6 +63,17 @@ end
 -- ComboField ranks Add() entries alphabetically; match choices by label text, never id.
 Controls.Register("number", { widget = "number" })
 Controls.Register("string", { widget = "text" })
+Controls.Register("compareOperation", {
+    widget = "enum",
+    choices = {
+        { value = "==", label = "==" },
+        { value = "!=", label = "!=" },
+        { value = ">",  label = ">" },
+        { value = "<",  label = "<" },
+        { value = ">=", label = ">=" },
+        { value = "<=", label = "<=" },
+    },
+})
 Controls.Register("bool", {
     widget = "enum",
     choices = {

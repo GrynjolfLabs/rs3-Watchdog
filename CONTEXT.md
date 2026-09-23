@@ -134,6 +134,12 @@ else and scales with zoom; connecting the Pin replaces it with a Wire (ADR-0004)
 it opens the Control Editor.
 _Avoid_: Field, input box, widget (that's the mounted Editor), textbox
 
+**Compare**:
+A Node that compares two values and produces a boolean Result. Its Operation Control
+selects equality, inequality, greater than, less than, greater or equal, or less or equal.
+Changing the Operation leaves the two input Pins and their Wires in place.
+_Avoid_: Six separate comparison types (these remain only in previously saved alerts)
+
 **Control Editor**:
 The single transient real component (`ui.InputField` for text/number, `ui.ComboField` for
 an enum) mounted over a Control Box while the user edits it, committing through
