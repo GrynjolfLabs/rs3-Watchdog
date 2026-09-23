@@ -180,13 +180,23 @@ local function frontToolbarTooltip(btn)
     btn.tooltip.root:MoveToFront()
 end
 
--- mux SyncChrome calls this after restacking Maximize.
+-- Visible toolbar and inventory tooltips share the overlay.
 function Editor:FrontOverlayTooltips()
     frontToolbarTooltip(self.renameButton)
     frontToolbarTooltip(self.backButton)
     frontToolbarTooltip(self.resetViewButton)
     frontToolbarTooltip(self.plusButton)
     InvViewer.FrontTooltips(self)
+end
+
+-- Chrome is raised at the end of every frame. Restore the modal Palette's
+-- capture as well as its artwork so the resize grip cannot steal menu clicks.
+function Editor:FrontOverlayPopups()
+    if self.palette.open then
+        self:frontOverlayInteractives()
+    else
+        self:FrontOverlayTooltips()
+    end
 end
 
 -- Capture under palette under toolbar under transient editors (overlay above PrettyUI window).
