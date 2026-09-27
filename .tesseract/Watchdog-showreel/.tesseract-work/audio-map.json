@@ -31,6 +31,8 @@
     {"ms": 19750, "music": "dropout",                                 "picture": "cut to black"},
     {"ms": 20000, "music": "impact + crash, outro groove",            "picture": "logo lockup slams; CTA builds 20.5-21.6"},
     {"ms": 22000, "music": "chord change (Db)",                       "picture": "wire connects eye to URL pin"},
-    {"ms": 24000, "music": "final stab",                              "picture": "final pulse; fade 24.3-25.0"}
+    {"ms": 24000, "music": "final stab",                              "picture": "final pulse; eye blink ~23.9"},
+    {"ms": 25000, "music": "b12 tail groove",                         "picture": "blackout dissolve 25.0-26.0"},
+    {"ms": 25850, "music": "master tail fade to silence",             "picture": "hold lockup under fade"}
   ]
 }

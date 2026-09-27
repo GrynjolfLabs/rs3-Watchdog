@@ -5,7 +5,7 @@
   "width": 1920,
   "height": 1080
  },
- "duration": 25.0,
+ "duration": 26.0,
  "composition": {
   "id": "main",
   "layers": [
@@ -16,7 +16,7 @@
     "blendMode": "normal",
     "activeRange": {
      "start": 0,
-     "duration": 25000
+     "duration": 26000
     },
     "transform": {
      "anchorPoint": [
@@ -55,7 +55,7 @@
     "blendMode": "normal",
     "activeRange": {
      "start": 0,
-     "duration": 25000
+     "duration": 26000
     },
     "transform": {
      "anchorPoint": [
@@ -94,7 +94,7 @@
     "blendMode": "normal",
     "activeRange": {
      "start": 0,
-     "duration": 25000
+     "duration": 26000
     },
     "transform": {
      "anchorPoint": [
@@ -174,7 +174,7 @@
     "blendMode": "normal",
     "activeRange": {
      "start": 0,
-     "duration": 25000
+     "duration": 26000
     },
     "transform": {
      "anchorPoint": [
@@ -200,7 +200,7 @@
       "blendMode": "normal",
       "activeRange": {
        "start": 20000,
-       "duration": 5000
+       "duration": 6000
       },
       "transform": {
        "anchorPoint": [
@@ -226,7 +226,7 @@
         "blendMode": "normal",
         "activeRange": {
          "start": 0,
-         "duration": 5000
+         "duration": 6000
         },
         "transform": {
          "anchorPoint": [
@@ -252,7 +252,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -278,7 +278,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -362,7 +362,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -437,7 +437,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -508,7 +508,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -579,7 +579,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -646,7 +646,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -713,7 +713,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -780,7 +780,7 @@
             "blendMode": "normal",
             "activeRange": {
              "start": 0,
-             "duration": 5000
+             "duration": 6000
             },
             "transform": {
              "anchorPoint": [
@@ -849,7 +849,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -917,7 +917,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -985,7 +985,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1049,7 +1049,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1097,7 +1097,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1145,7 +1145,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1153,8 +1153,8 @@
             0
            ],
            "position": [
-            0,
-            0
+            472.0,
+            770.0
            ],
            "scale": [
             100,
@@ -1168,18 +1168,18 @@
             "commands": [
              {
               "type": "moveTo",
-              "x": 460.8,
-              "y": 756.0
+              "x": -11.200000000000001,
+              "y": -14.0
              },
              {
               "type": "lineTo",
-              "x": 486.0,
-              "y": 770.0
+              "x": 14.0,
+              "y": 0
              },
              {
               "type": "lineTo",
-              "x": 460.8,
-              "y": 784.0
+              "x": -11.200000000000001,
+              "y": 14.0
              },
              {
               "type": "close"
@@ -1212,7 +1212,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1279,7 +1279,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1329,7 +1329,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1372,7 +1372,7 @@
         "blendMode": "normal",
         "activeRange": {
          "start": 0,
-         "duration": 5000
+         "duration": 6000
         },
         "transform": {
          "anchorPoint": [
@@ -1443,7 +1443,7 @@
         "blendMode": "normal",
         "activeRange": {
          "start": 0,
-         "duration": 5000
+         "duration": 6000
         },
         "transform": {
          "anchorPoint": [
@@ -1469,7 +1469,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -1741,7 +1741,7 @@
           "blendMode": "normal",
           "activeRange": {
            "start": 0,
-           "duration": 5000
+           "duration": 6000
           },
           "transform": {
            "anchorPoint": [
@@ -6611,8 +6611,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              384.0,
+              73.60000000000001
              ],
              "scale": [
               100,
@@ -6626,18 +6626,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 376.32,
-                "y": 64.0
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 393.6,
-                "y": 73.60000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 376.32,
-                "y": 83.20000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -7138,8 +7138,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              16,
+              73.60000000000001
              ],
              "scale": [
               100,
@@ -7153,18 +7153,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 8.319999999999999,
-                "y": 64.0
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 25.6,
-                "y": 73.60000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 8.319999999999999,
-                "y": 83.20000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -7352,8 +7352,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              16,
+              112.00000000000001
              ],
              "scale": [
               100,
@@ -7367,18 +7367,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 8.319999999999999,
-                "y": 102.4
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 25.6,
-                "y": 112.00000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 8.319999999999999,
-                "y": 121.60000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -8657,8 +8657,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              16,
+              73.60000000000001
              ],
              "scale": [
               100,
@@ -8672,18 +8672,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 8.319999999999999,
-                "y": 64.0
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 25.6,
-                "y": 73.60000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 8.319999999999999,
-                "y": 83.20000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -8871,8 +8871,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              16,
+              112.00000000000001
              ],
              "scale": [
               100,
@@ -8886,18 +8886,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 8.319999999999999,
-                "y": 102.4
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 25.6,
-                "y": 112.00000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 8.319999999999999,
-                "y": 121.60000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -10141,8 +10141,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              16,
+              73.60000000000001
              ],
              "scale": [
               100,
@@ -10156,18 +10156,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 8.319999999999999,
-                "y": 64.0
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 25.6,
-                "y": 73.60000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 8.319999999999999,
-                "y": 83.20000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -11496,8 +11496,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              384.0,
+              73.60000000000001
              ],
              "scale": [
               100,
@@ -11511,18 +11511,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 376.32,
-                "y": 64.0
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 393.6,
-                "y": 73.60000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 376.32,
-                "y": 83.20000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -11943,8 +11943,8 @@
               0
              ],
              "position": [
-              0,
-              0
+              16,
+              73.60000000000001
              ],
              "scale": [
               100,
@@ -11958,18 +11958,18 @@
               "commands": [
                {
                 "type": "moveTo",
-                "x": 8.319999999999999,
-                "y": 64.0
+                "x": -7.6800000000000015,
+                "y": -9.600000000000001
                },
                {
                 "type": "lineTo",
-                "x": 25.6,
-                "y": 73.60000000000001
+                "x": 9.600000000000001,
+                "y": 0
                },
                {
                 "type": "lineTo",
-                "x": 8.319999999999999,
-                "y": 83.20000000000002
+                "x": -7.6800000000000015,
+                "y": 9.600000000000001
                },
                {
                 "type": "close"
@@ -20550,7 +20550,7 @@
       "blendMode": "normal",
       "activeRange": {
        "start": 0,
-       "duration": 25000
+       "duration": 26000
       },
       "transform": {
        "anchorPoint": [
@@ -20611,19 +20611,19 @@
     "name": "music bed (original, 120 BPM)",
     "activeRange": {
      "start": 0,
-     "duration": 25000
+     "duration": 26000
     },
     "sourceRange": {
      "start": 0,
-     "duration": 25000
+     "duration": 26000
     },
-    "sourceIntrinsicDuration": 25000,
+    "sourceIntrinsicDuration": 26000,
     "source": {
      "assetId": "music-v1"
     },
     "volume": 0.75,
     "captionsEnabled": false,
-    "windowMs": 25000
+    "windowMs": 26000
    },
    {
     "type": "Audio",
@@ -25996,7 +25996,7 @@
         "layerTime": 2060,
         "value": {
          "type": "float",
-         "value": 175.0
+         "value": 120.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -26050,7 +26050,7 @@
         "layerTime": 2060,
         "value": {
          "type": "float",
-         "value": 175.0
+         "value": 120.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -26213,7 +26213,7 @@
         "layerTime": 2560,
         "value": {
          "type": "float",
-         "value": 175.0
+         "value": 120.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -26267,7 +26267,7 @@
         "layerTime": 2560,
         "value": {
          "type": "float",
-         "value": 175.0
+         "value": 120.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -33321,7 +33321,7 @@
         "layerTime": 2060,
         "value": {
          "type": "float",
-         "value": 170.0
+         "value": 120.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -33375,7 +33375,7 @@
         "layerTime": 2060,
         "value": {
          "type": "float",
-         "value": 170.0
+         "value": 120.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -33818,7 +33818,7 @@
        },
        {
         "id": "k862",
-        "layerTime": 5000,
+        "layerTime": 6000,
         "value": {
          "type": "float",
          "value": -120.0
@@ -34017,7 +34017,7 @@
        },
        {
         "id": "k877",
-        "layerTime": 24350,
+        "layerTime": 25000,
         "value": {
          "type": "float",
          "value": 0.0
@@ -34028,17 +34028,13 @@
        },
        {
         "id": "k878",
-        "layerTime": 25000,
+        "layerTime": 26000,
         "value": {
          "type": "float",
          "value": 100.0
         },
         "easing": {
-         "type": "cubicBezier",
-         "x1": 0.7,
-         "y1": 0,
-         "x2": 0.84,
-         "y2": 0
+         "type": "linear"
         }
        }
       ]

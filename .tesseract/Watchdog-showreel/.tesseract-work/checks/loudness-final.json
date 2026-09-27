@@ -1,8 +1,7 @@
 {
-  "file": "Watchdog-showreel.mp4",
-  "tool": "ffmpeg loudnorm (EBU R128)",
-  "integrated_lufs": -15.28,
-  "true_peak_dbtp": -3.05,
-  "lra_lu": 2.50,
-  "target": "-16..-14 LUFS, <= -1 dBTP"
+  "source": "Watchdog-showreel.mp4 (27s export)",
+  "input_i": "-15.23",
+  "input_tp": "-3.05",
+  "input_lra": "4.80",
+  "target": "integrated -16..-14 LUFS, true peak <= -1 dBTP"
 }

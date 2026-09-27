@@ -1,4 +1,4 @@
-# Watchdog showreel (25 s, 1920x1080, 30 fps)
+# Watchdog showreel (26 s, 1920x1080, 30 fps)
 
 Built from scratch from the Watchdog plugin code (`ui/theme.lua`, `toast.lua`, `nodes/**`,
 `resources/images/bell.png`) and the mod.io page URL. No assets or decisions carried over from
@@ -9,7 +9,7 @@ the earlier portrait announcement in `.tesseract/`.
 | File | What |
 | --- | --- |
 | `Watchdog-showreel.tsrct` | Editable document (native layers + AnimationGraph, no prerendered design) |
-| `Watchdog-showreel.mp4` | Export: H.264 1920x1080 30 fps, AAC 48 kHz stereo, 25.000 s |
+| `Watchdog-showreel.mp4` | Export: H.264 1920x1080 30 fps, AAC 48 kHz stereo, 26.000 s |
 | `Previews/filmstrip-overview.png` | 21-frame overview |
 | `.tesseract-work/build.py` | Generator for the whole document (all beat times, nodes, wires) |
 | `.tesseract-work/make_music.py` | Original 120 BPM F-minor music bed synthesis |
@@ -29,7 +29,7 @@ Rebuild: `python .tesseract-work/build.py` then
 | 6.0 - 14.0 | Editor: Inventory -> Toast wired live, toast fires, zoom out to bigger graph, headline | nodes land on beats; connect 8.0, toast 9.0 |
 | 13.88 - 19.75 | WHEN / THEN reels: real trigger -> action pairs | per beat, 8ths, 16ths; Screen Flash fires 16.5 |
 | 19.75 - 20.0 | Blackout | dropout |
-| 20.0 - 25.0 | Outro: lockup, "Get it on mod.io", `mod.io/g/runescape/m/watchdog` | URL wire lands 22.0, blink 23.9, stab 24.0 |
+| 20.0 - 26.0 | Outro: lockup, "Get it on mod.io", `mod.io/g/runescape/m/watchdog` | URL wire lands 22.0, blink 23.9, stab 24.0; fade to black 25.0-26.0 |
 
 All node names, pin labels, defaults and colors come from the plugin source
 (e.g. Screen Flash default red, Toast pins, Player Chat matcher rows, theme category colors).

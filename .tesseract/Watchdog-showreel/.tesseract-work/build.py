@@ -22,7 +22,7 @@ from pathlib import Path
 
 WORK = Path(__file__).parent
 W, H = 1920, 1080
-DUR_MS = 25000
+DUR_MS = 26000
 
 
 # ------------------------------------------------------------------ palette
@@ -421,8 +421,8 @@ def node(name, x, y, title, header, left, right, start, dur):
         kind = spec["kind"]
         if kind in ("exec", "data"):
             if kind == "exec":
-                g = shape(f"{title} {spec['label']} pin", tri_right(16, yy, GLYPH), 0, dur,
-                          fill=fill_style(EXEC))
+                g = shape(f"{title} {spec['label']} pin", tri_right(0, 0, GLYPH), 0, dur,
+                          fill=fill_style(EXEC), x=16, y=yy)
             else:
                 g = rect(f"{title} {spec['label']} pin", 16, yy, GLYPH * 0.8, GLYPH * 0.8, spec["color"],
                          0, dur, ax=GLYPH * 0.4, ay=GLYPH * 0.4)
@@ -452,7 +452,8 @@ def node(name, x, y, title, header, left, right, start, dur):
         yy = cy(r)
         px = NW - 16
         if spec["kind"] == "exec":
-            g = shape(f"{title} {spec['label']} out", tri_right(px, yy, GLYPH), 0, dur, fill=fill_style(EXEC))
+            g = shape(f"{title} {spec['label']} out", tri_right(0, 0, GLYPH), 0, dur,
+                      fill=fill_style(EXEC), x=px, y=yy)
         else:
             g = rect(f"{title} {spec['label']} out", px, yy, GLYPH * 0.8, GLYPH * 0.8, spec["color"], 0, dur,
                      ax=GLYPH * 0.4, ay=GLYPH * 0.4)
@@ -720,10 +721,10 @@ def scene_editor():
 
     # connect on the 8000 downbeat
     flash_outline(i2, 8000)
-    pulse_glyph(i2["glyphs"]["in:show"], 8000)
+    pulse_glyph(i2["glyphs"]["in:show"], 8000, peak=120)
     # trigger fires at 8500: header flash + pulse along the wire, toast pops at 9000
     flash_outline(i1, 8500, hold=120)
-    pulse_glyph(i1["glyphs"]["out:"], 8500)
+    pulse_glyph(i1["glyphs"]["out:"], 8500, peak=120)
     geid, g_eff = glow(radius=22, intensity=1.4, threshold=0.05)
     pulse = rect("exec pulse", 0, 0, 20, 20, ORANGE, 0, SD, ax=10, ay=10, o=0, effects=[g_eff])
     D.item_owner[geid] = pulse["id"]
@@ -875,8 +876,8 @@ def scene_reels():
 
 
 def scene_outro():
-    """20000-25000: lockup + mod.io call to action."""
-    S0, SD = 20000, 5000
+    """20000-26000: lockup + mod.io call to action."""
+    S0, SD = 20000, 6000
     t = 20000
     eye, ids = eye_mark("outro eye", 960, 300, 0.78, 0, SD, t)
     word = text("outro wordmark", "WATCHDOG", 960, 540, 168, 0, SD, just="center", tracking=60)
@@ -897,7 +898,7 @@ def scene_outro():
     D.keys(sel["id"], "opacity", [(21999, 0, HOLD), (22000, 100, HOLD), (22300, 100, LIN), (22800, 55, OUT_SOFT)])
     pin_x = bx - 38
     pin_y = by + bh / 2
-    upin = shape("url pin", tri_right(pin_x, pin_y, 28), 0, SD, fill=fill_style(EXEC), o=0)
+    upin = shape("url pin", tri_right(0, 0, 28), 0, SD, fill=fill_style(EXEC), x=pin_x, y=pin_y, o=0)
     D.keys(upin["id"], "opacity", [(21299, 0, HOLD), (21300, 100, HOLD)])
     uwire = shape("url wire", [M(-40, pin_y), L(pin_x - 22, pin_y)], 0, SD, stroke=stroke_style(EXEC, 5), trim=0)
     D.keys(uwire["id"], "trimEnd", [(21600, 0, LIN), (22000, 100, INOUT)])
@@ -907,7 +908,7 @@ def scene_outro():
     D._item = max(D._item, ge)
     D.keys(upulse["id"], "positionX", [(21600, -30, LIN), (22000, pin_x - 20, INOUT)])
     D.keys(upulse["id"], "opacity", [(21599, 0, HOLD), (21600, 100, HOLD), (22000, 100, LIN), (22100, 0, LIN)])
-    pulse_glyph(upin["id"], 22000, peak=170)
+    pulse_glyph(upin["id"], 22000, peak=120)
     foot = text("outro footer", "RuneScape 3 plugin", 960, 1000, 24, 0, SD, font=MONO, style="Medium",
                 color=PIN_LABEL, just="center", o=0)
     D.keys(foot["id"], "opacity", [(21500, 0, LIN), (21900, 70, OUT)])
@@ -929,7 +930,7 @@ def scene_outro():
                           "stops": [{"offset": 0, "color": [ORANGE[0], ORANGE[1], ORANGE[2], 0.14]},
                                     {"offset": 1, "color": [ORANGE[0], ORANGE[1], ORANGE[2], 0]}]})
     og = grid("outro grid", -200, -200, 2200, 1500, 0, SD, o=60)
-    D.keys(og["id"], "positionY", [(20000, 0, LIN), (25000, -120, LIN)])
+    D.keys(og["id"], "positionY", [(20000, 0, LIN), (26000, -120, LIN)])
     return group("S5 Outro", [lock, glow_bg, og], S0, SD)
 
 
@@ -955,7 +956,7 @@ def build():
     blackout = rect("blackout", 0, 0, W, H, BLACK, 0, DUR_MS, o=0)
     D.keys(blackout["id"], "opacity", [(3749, 0, HOLD), (3750, 100, HOLD), (3999, 100, HOLD), (4000, 0, HOLD),
                                        (19749, 0, HOLD), (19750, 100, HOLD), (19999, 100, HOLD), (20000, 0, HOLD),
-                                       (24350, 0, LIN), (25000, 100, IN)])
+                                       (25000, 0, LIN), (26000, 100, LIN)])
 
     bg = rect("viewport background", 0, 0, W, H, BG, 0, DUR_MS)
 
@@ -981,7 +982,7 @@ def build():
                            "stops": [{"offset": 0, "color": [0, 0, 0, 0]}, {"offset": 0.5, "color": [0, 0, 0, 0]},
                                      {"offset": 1, "color": [0, 0, 0, 0.55]}]})
     sound = [
-        audio("music bed (original, 120 BPM)", "music-v1", 0, 25000, 0.75),
+        audio("music bed (original, 120 BPM)", "music-v1", 0, 26000, 0.75),
         audio("sfx whoosh: pupil zoom", "sfx-whoosh-a", 5657, 500, 0.45),
         audio("sfx click: wire connects", "sfx-connect-click", 8000, 65, 0.55),
         audio("sfx pop: toast", "sfx-toast-pop", 9000, 180, 0.6),
