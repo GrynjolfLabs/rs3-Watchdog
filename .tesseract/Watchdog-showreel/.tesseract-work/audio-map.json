@@ -1,0 +1,36 @@
+{
+  "music": {
+    "file": "Sources/audio/showreel-music-v1.wav",
+    "assetId": "music-v1",
+    "origin": "Original, synthesized by .tesseract-work/make_music.py (no samples)",
+    "bpm": 120,
+    "beat_ms": 500,
+    "bar_ms": 2000,
+    "project_start_ms": 0,
+    "source_start_ms": 0,
+    "note": "music source time == project time (placed at 0, untrimmed)"
+  },
+  "verification": "Visual waveform checks only (checks/music-overview-v1.png, music-zoom-drop1-v1.png, music-zoom-drop2-v1.png). Not auditioned: the agent host cannot play audio.",
+  "cues": [
+    {"ms": 0,     "music": "intro: kick + stab on every beat",       "picture": "hook feed: one real trigger event slams in per beat"},
+    {"ms": 2000,  "music": "build: 16th hats, snare roll, riser",    "picture": "feed accelerates to 8ths then 16ths"},
+    {"ms": 3750,  "music": "dropout (near silence)",                 "picture": "hard cut to black"},
+    {"ms": 4000,  "music": "DROP: impact + crash, groove starts",     "picture": "Watchdog eye + wordmark slam, flash"},
+    {"ms": 5500,  "music": "groove",                                  "picture": "pupil diamond zooms to fill frame", "sfx": "sfx-whoosh-a starts 5657 (peak 193 ms in -> 5850)"},
+    {"ms": 6000,  "music": "bar",                                     "picture": "cut to editor; Inventory trigger node lands"},
+    {"ms": 6500,  "music": "beat",                                    "picture": "Toast action node lands"},
+    {"ms": 7000,  "music": "beat",                                    "picture": "wire starts dragging from Inventory.out"},
+    {"ms": 8000,  "music": "bar downbeat",                            "picture": "wire connects to Toast.show", "sfx": "sfx-connect-click at 8000"},
+    {"ms": 8500,  "music": "beat",                                    "picture": "trigger fires: pulse travels the wire"},
+    {"ms": 9000,  "music": "beat",                                    "picture": "toast pops in", "sfx": "sfx-toast-pop at 9000"},
+    {"ms": 10000, "music": "bar; arp joins",                          "picture": "zoom out; more nodes land on beats 10.0-11.5", "sfx": "sfx-whoosh-b starts 9758 (peak 292 ms in -> 10050)"},
+    {"ms": 12000, "music": "bar",                                     "picture": "headline reveal"},
+    {"ms": 14000, "music": "bar; drive section, beat ticks",          "picture": "WHEN/THEN reels; one pair per beat"},
+    {"ms": 16500, "music": "Ab stab accent",                          "picture": "Game Message -> Screen Flash pair + real full-frame flash"},
+    {"ms": 18000, "music": "build 2: no kick, roll, riser",           "picture": "reels spin on 8ths then 16ths"},
+    {"ms": 19750, "music": "dropout",                                 "picture": "cut to black"},
+    {"ms": 20000, "music": "impact + crash, outro groove",            "picture": "logo lockup slams; CTA builds 20.5-21.6"},
+    {"ms": 22000, "music": "chord change (Db)",                       "picture": "wire connects eye to URL pin"},
+    {"ms": 24000, "music": "final stab",                              "picture": "final pulse; fade 24.3-25.0"}
+  ]
+}

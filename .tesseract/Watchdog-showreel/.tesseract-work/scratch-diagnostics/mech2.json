@@ -1,0 +1,469 @@
+{
+ "$schema": "https://jerboa.dev/schemas/fx-composition/editable/v1/document.schema.json",
+ "formatVersion": 1,
+ "dimensions": {
+  "width": 1920,
+  "height": 1080
+ },
+ "duration": 2.0,
+ "composition": {
+  "id": "main",
+  "layers": [
+   {
+    "type": "Text",
+    "id": 1,
+    "name": "Reveal text",
+    "blendMode": "normal",
+    "activeRange": {
+     "start": 0,
+     "duration": 2000
+    },
+    "transform": {
+     "anchorPoint": [
+      0,
+      0
+     ],
+     "position": [
+      960,
+      300
+     ],
+     "scale": [
+      100,
+      100
+     ],
+     "rotation": 0,
+     "opacity": 100
+    },
+    "sourceText": {
+     "text": "WATCHDOG",
+     "fontFamily": "Space Grotesk Light Medium",
+     "fontStyle": "Regular",
+     "fontSize": 160,
+     "fillColor": [
+      1,
+      1,
+      1,
+      1
+     ],
+     "justification": "center",
+     "strokeWidth": 0
+    },
+    "animators": [
+     {
+      "id": 101,
+      "position": [
+       0,
+       120
+      ],
+      "opacity": 0,
+      "selectors": [
+       {
+        "id": 102,
+        "amount": 1,
+        "basedOn": "characters",
+        "start": 0,
+        "end": 1,
+        "offset": 0,
+        "mode": "add",
+        "shape": "rampUp",
+        "units": "percentage"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "type": "Shape",
+    "id": 2,
+    "name": "Wire",
+    "blendMode": "normal",
+    "activeRange": {
+     "start": 0,
+     "duration": 2000
+    },
+    "transform": {
+     "anchorPoint": [
+      0,
+      0
+     ],
+     "position": [
+      0,
+      0
+     ],
+     "scale": [
+      100,
+      100
+     ],
+     "rotation": 0,
+     "opacity": 100
+    },
+    "shape": {
+     "path": {
+      "commands": [
+       {
+        "type": "moveTo",
+        "x": 200,
+        "y": 700
+       },
+       {
+        "type": "cubicTo",
+        "c1x": 600,
+        "c1y": 700,
+        "c2x": 700,
+        "c2y": 950,
+        "x": 1100,
+        "y": 950
+       }
+      ]
+     },
+     "strokes": [
+      {
+       "blendMode": "normal",
+       "cap": "round",
+       "join": "round",
+       "miterLimit": 4,
+       "opacity": 100,
+       "paint": {
+        "type": "solid",
+        "color": [
+         1,
+         1,
+         1,
+         1
+        ]
+       },
+       "width": 8
+      }
+     ],
+     "fills": [],
+     "trim": {
+      "start": 0,
+      "end": 0,
+      "mode": "simultaneously"
+     }
+    }
+   },
+   {
+    "type": "Rect",
+    "id": 3,
+    "name": "Rect probe",
+    "blendMode": "normal",
+    "activeRange": {
+     "start": 0,
+     "duration": 2000
+    },
+    "transform": {
+     "anchorPoint": [
+      0,
+      0
+     ],
+     "position": [
+      1300,
+      600
+     ],
+     "scale": [
+      100,
+      100
+     ],
+     "rotation": 0,
+     "opacity": 100,
+     "rotationY": 0
+    },
+    "rect": {
+     "size": [
+      200,
+      100
+     ],
+     "fillColor": [
+      0.94,
+      0.63,
+      0.13,
+      1
+     ]
+    },
+    "effects": [
+     {
+      "id": 301,
+      "effect": {
+       "type": "glow",
+       "glowIntensity": 1,
+       "glowRadius": 30,
+       "glowThreshold": 0.2
+      }
+     }
+    ]
+   },
+   {
+    "type": "Rect",
+    "id": 4,
+    "name": "Origin dot",
+    "blendMode": "normal",
+    "activeRange": {
+     "start": 0,
+     "duration": 2000
+    },
+    "transform": {
+     "anchorPoint": [
+      5,
+      5
+     ],
+     "position": [
+      1300,
+      600
+     ],
+     "scale": [
+      100,
+      100
+     ],
+     "rotation": 0,
+     "opacity": 100
+    },
+    "rect": {
+     "size": [
+      10,
+      10
+     ],
+     "fillColor": [
+      1,
+      0,
+      0,
+      1
+     ]
+    }
+   },
+   {
+    "type": "Rect",
+    "id": 6,
+    "name": "Matte",
+    "blendMode": "normal",
+    "activeRange": {
+     "start": 0,
+     "duration": 2000
+    },
+    "transform": {
+     "anchorPoint": [
+      0,
+      0
+     ],
+     "position": [
+      200,
+      450
+     ],
+     "scale": [
+      100,
+      100
+     ],
+     "rotation": 0,
+     "opacity": 100
+    },
+    "rect": {
+     "size": [
+      400,
+      150
+     ],
+     "fillColor": [
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   },
+   {
+    "type": "Text",
+    "id": 5,
+    "name": "Matted",
+    "blendMode": "normal",
+    "activeRange": {
+     "start": 0,
+     "duration": 2000
+    },
+    "transform": {
+     "anchorPoint": [
+      0,
+      0
+     ],
+     "position": [
+      150,
+      560
+     ],
+     "scale": [
+      100,
+      100
+     ],
+     "rotation": 0,
+     "opacity": 100
+    },
+    "sourceText": {
+     "text": "MATTE MATTE MATTE",
+     "fontFamily": "JetBrains Mono Medium",
+     "fontStyle": "Regular",
+     "fontSize": 80,
+     "fillColor": [
+      0.3,
+      0.6,
+      1,
+      1
+     ],
+     "justification": "left",
+     "strokeWidth": 0
+    },
+    "trackMatte": {
+     "layer": 6,
+     "mode": "alpha"
+    }
+   },
+   {
+    "type": "Rect",
+    "id": 9,
+    "name": "BG",
+    "blendMode": "normal",
+    "activeRange": {
+     "start": 0,
+     "duration": 2000
+    },
+    "transform": {
+     "anchorPoint": [
+      0,
+      0
+     ],
+     "position": [
+      0,
+      0
+     ],
+     "scale": [
+      100,
+      100
+     ],
+     "rotation": 0,
+     "opacity": 100
+    },
+    "rect": {
+     "size": [
+      1920,
+      1080
+     ],
+     "fillColor": [
+      0.102,
+      0.102,
+      0.118,
+      1
+     ]
+    }
+   }
+  ],
+  "name": "Main",
+  "dynamics": {
+   "entries": [
+    {
+     "target": {
+      "kind": "fxItemProperty",
+      "itemId": 102,
+      "propertyName": "offset"
+     },
+     "animator": {
+      "type": "keyframes",
+      "enabled": true,
+      "keyframes": [
+       {
+        "id": "sel-a",
+        "layerTime": 0,
+        "value": {
+         "type": "float",
+         "value": -1
+        },
+        "easing": {
+         "type": "cubicBezier",
+         "x1": 0.2,
+         "y1": 0,
+         "x2": 0,
+         "y2": 1
+        }
+       },
+       {
+        "id": "sel-b",
+        "layerTime": 1000,
+        "value": {
+         "type": "float",
+         "value": 1
+        },
+        "easing": {
+         "type": "cubicBezier",
+         "x1": 0.2,
+         "y1": 0,
+         "x2": 0,
+         "y2": 1
+        }
+       }
+      ]
+     }
+    },
+    {
+     "target": {
+      "kind": "layer",
+      "layerId": 2,
+      "propertyType": "trimEnd"
+     },
+     "animator": {
+      "type": "keyframes",
+      "enabled": true,
+      "keyframes": [
+       {
+        "id": "trim-a",
+        "layerTime": 0,
+        "value": {
+         "type": "float",
+         "value": 0
+        },
+        "easing": {
+         "type": "cubicBezier",
+         "x1": 0.2,
+         "y1": 0,
+         "x2": 0,
+         "y2": 1
+        }
+       },
+       {
+        "id": "trim-b",
+        "layerTime": 1000,
+        "value": {
+         "type": "float",
+         "value": 100
+        },
+        "easing": {
+         "type": "cubicBezier",
+         "x1": 0.2,
+         "y1": 0,
+         "x2": 0,
+         "y2": 1
+        }
+       }
+      ]
+     }
+    },
+    {
+     "target": {
+      "kind": "layer",
+      "layerId": 3,
+      "propertyType": "rotationY"
+     },
+     "animator": {
+      "type": "jsScript",
+      "layerTimeJsCode": "return input.time.seconds * 60;"
+     }
+    },
+    {
+     "target": {
+      "kind": "effectProperty",
+      "effectId": 301,
+      "paramName": "glowRadius"
+     },
+     "animator": {
+      "type": "jsScript",
+      "layerTimeJsCode": "return 5 + input.time.seconds * 40;"
+     }
+    }
+   ]
+  }
+ }
+}
