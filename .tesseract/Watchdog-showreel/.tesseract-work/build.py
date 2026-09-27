@@ -401,6 +401,9 @@ RH = 24 * K
 PT = 8 * K
 PB = 10 * K
 GLYPH = 12 * K
+# tri_right(0, 0, s) centroid (see tri_right); scale pulses use this anchor.
+PIN_AX = -0.2 * (GLYPH / 2)
+PIN_AY = 0
 
 
 def node(name, x, y, title, header, left, right, start, dur):
@@ -422,7 +425,7 @@ def node(name, x, y, title, header, left, right, start, dur):
         if kind in ("exec", "data"):
             if kind == "exec":
                 g = shape(f"{title} {spec['label']} pin", tri_right(0, 0, GLYPH), 0, dur,
-                          fill=fill_style(EXEC), x=16, y=yy)
+                          fill=fill_style(EXEC), x=16, y=yy, ax=PIN_AX, ay=PIN_AY)
             else:
                 g = rect(f"{title} {spec['label']} pin", 16, yy, GLYPH * 0.8, GLYPH * 0.8, spec["color"],
                          0, dur, ax=GLYPH * 0.4, ay=GLYPH * 0.4)
@@ -453,7 +456,7 @@ def node(name, x, y, title, header, left, right, start, dur):
         px = NW - 16
         if spec["kind"] == "exec":
             g = shape(f"{title} {spec['label']} out", tri_right(0, 0, GLYPH), 0, dur,
-                      fill=fill_style(EXEC), x=px, y=yy)
+                      fill=fill_style(EXEC), x=px, y=yy, ax=PIN_AX, ay=PIN_AY)
         else:
             g = rect(f"{title} {spec['label']} out", px, yy, GLYPH * 0.8, GLYPH * 0.8, spec["color"], 0, dur,
                      ax=GLYPH * 0.4, ay=GLYPH * 0.4)
@@ -519,7 +522,7 @@ def flash_outline(info, t, hold=180, fade=420):
 
 
 def pulse_glyph(lid, t, peak=175):
-    D.scale(lid, [(t - 1, 100, LIN), (t + 60, peak, OUT), (t + 320, 100, OUT_SOFT)])
+    D.scale(lid, [(t - 1, 100, LIN), (t + 45, peak, OUT), (t + 260, 100, OUT_SOFT)])
 
 
 # ------------------------------------------------------------------ eye mark (logo)
@@ -721,10 +724,10 @@ def scene_editor():
 
     # connect on the 8000 downbeat
     flash_outline(i2, 8000)
-    pulse_glyph(i2["glyphs"]["in:show"], 8000, peak=120)
+    pulse_glyph(i2["glyphs"]["in:show"], 8000, peak=162)
     # trigger fires at 8500: header flash + pulse along the wire, toast pops at 9000
     flash_outline(i1, 8500, hold=120)
-    pulse_glyph(i1["glyphs"]["out:"], 8500, peak=120)
+    pulse_glyph(i1["glyphs"]["out:"], 8500, peak=162)
     geid, g_eff = glow(radius=22, intensity=1.4, threshold=0.05)
     pulse = rect("exec pulse", 0, 0, 20, 20, ORANGE, 0, SD, ax=10, ay=10, o=0, effects=[g_eff])
     D.item_owner[geid] = pulse["id"]
@@ -898,7 +901,9 @@ def scene_outro():
     D.keys(sel["id"], "opacity", [(21999, 0, HOLD), (22000, 100, HOLD), (22300, 100, LIN), (22800, 55, OUT_SOFT)])
     pin_x = bx - 38
     pin_y = by + bh / 2
-    upin = shape("url pin", tri_right(0, 0, 28), 0, SD, fill=fill_style(EXEC), x=pin_x, y=pin_y, o=0)
+    pin_ax = -0.2 * (28 / 2)
+    upin = shape("url pin", tri_right(0, 0, 28), 0, SD, fill=fill_style(EXEC), x=pin_x, y=pin_y,
+                  ax=pin_ax, ay=0, o=0)
     D.keys(upin["id"], "opacity", [(21299, 0, HOLD), (21300, 100, HOLD)])
     uwire = shape("url wire", [M(-40, pin_y), L(pin_x - 22, pin_y)], 0, SD, stroke=stroke_style(EXEC, 5), trim=0)
     D.keys(uwire["id"], "trimEnd", [(21600, 0, LIN), (22000, 100, INOUT)])
@@ -908,7 +913,7 @@ def scene_outro():
     D._item = max(D._item, ge)
     D.keys(upulse["id"], "positionX", [(21600, -30, LIN), (22000, pin_x - 20, INOUT)])
     D.keys(upulse["id"], "opacity", [(21599, 0, HOLD), (21600, 100, HOLD), (22000, 100, LIN), (22100, 0, LIN)])
-    pulse_glyph(upin["id"], 22000, peak=120)
+    pulse_glyph(upin["id"], 22000, peak=145)
     foot = text("outro footer", "RuneScape 3 plugin", 960, 1000, 24, 0, SD, font=MONO, style="Medium",
                 color=PIN_LABEL, just="center", o=0)
     D.keys(foot["id"], "opacity", [(21500, 0, LIN), (21900, 70, OUT)])
@@ -982,7 +987,7 @@ def build():
                            "stops": [{"offset": 0, "color": [0, 0, 0, 0]}, {"offset": 0.5, "color": [0, 0, 0, 0]},
                                      {"offset": 1, "color": [0, 0, 0, 0.55]}]})
     sound = [
-        audio("music bed (original, 120 BPM)", "music-v1", 0, 26000, 0.75),
+        audio("music bed (original, 120 BPM)", "music-v4", 0, 26000, 0.75),
         audio("sfx whoosh: pupil zoom", "sfx-whoosh-a", 5657, 500, 0.45),
         audio("sfx click: wire connects", "sfx-connect-click", 8000, 65, 0.55),
         audio("sfx pop: toast", "sfx-toast-pop", 9000, 180, 0.6),

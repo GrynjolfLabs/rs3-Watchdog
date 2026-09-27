@@ -1149,7 +1149,7 @@
           },
           "transform": {
            "anchorPoint": [
-            0,
+            -2.8000000000000003,
             0
            ],
            "position": [
@@ -6607,7 +6607,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -7134,7 +7134,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -7348,7 +7348,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -8653,7 +8653,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -8867,7 +8867,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -10137,7 +10137,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -11492,7 +11492,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -11939,7 +11939,7 @@
             },
             "transform": {
              "anchorPoint": [
-              0,
+              -1.9200000000000004,
               0
              ],
              "position": [
@@ -20619,7 +20619,7 @@
     },
     "sourceIntrinsicDuration": 26000,
     "source": {
-     "assetId": "music-v1"
+     "assetId": "music-v4"
     },
     "volume": 0.75,
     "captionsEnabled": false,
@@ -25993,10 +25993,10 @@
        },
        {
         "id": "k308",
-        "layerTime": 2060,
+        "layerTime": 2045,
         "value": {
          "type": "float",
-         "value": 120.0
+         "value": 162.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -26008,7 +26008,7 @@
        },
        {
         "id": "k309",
-        "layerTime": 2320,
+        "layerTime": 2260,
         "value": {
          "type": "float",
          "value": 100.0
@@ -26047,10 +26047,10 @@
        },
        {
         "id": "k311",
-        "layerTime": 2060,
+        "layerTime": 2045,
         "value": {
          "type": "float",
-         "value": 120.0
+         "value": 162.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -26062,7 +26062,7 @@
        },
        {
         "id": "k312",
-        "layerTime": 2320,
+        "layerTime": 2260,
         "value": {
          "type": "float",
          "value": 100.0
@@ -26210,10 +26210,10 @@
        },
        {
         "id": "k322",
-        "layerTime": 2560,
+        "layerTime": 2545,
         "value": {
          "type": "float",
-         "value": 120.0
+         "value": 162.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -26225,7 +26225,7 @@
        },
        {
         "id": "k323",
-        "layerTime": 2820,
+        "layerTime": 2760,
         "value": {
          "type": "float",
          "value": 100.0
@@ -26264,10 +26264,10 @@
        },
        {
         "id": "k325",
-        "layerTime": 2560,
+        "layerTime": 2545,
         "value": {
          "type": "float",
-         "value": 120.0
+         "value": 162.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -26279,7 +26279,7 @@
        },
        {
         "id": "k326",
-        "layerTime": 2820,
+        "layerTime": 2760,
         "value": {
          "type": "float",
          "value": 100.0
@@ -33318,10 +33318,10 @@
        },
        {
         "id": "k833",
-        "layerTime": 2060,
+        "layerTime": 2045,
         "value": {
          "type": "float",
-         "value": 120.0
+         "value": 145.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -33333,7 +33333,7 @@
        },
        {
         "id": "k834",
-        "layerTime": 2320,
+        "layerTime": 2260,
         "value": {
          "type": "float",
          "value": 100.0
@@ -33372,10 +33372,10 @@
        },
        {
         "id": "k836",
-        "layerTime": 2060,
+        "layerTime": 2045,
         "value": {
          "type": "float",
-         "value": 120.0
+         "value": 145.0
         },
         "easing": {
          "type": "cubicBezier",
@@ -33387,7 +33387,7 @@
        },
        {
         "id": "k837",
-        "layerTime": 2320,
+        "layerTime": 2260,
         "value": {
          "type": "float",
          "value": 100.0

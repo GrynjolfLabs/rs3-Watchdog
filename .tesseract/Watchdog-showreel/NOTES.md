@@ -19,6 +19,11 @@ the earlier portrait announcement in `.tesseract/`.
 Rebuild: `python .tesseract-work/build.py` then
 `tsrct project commit --project Watchdog-showreel.tsrct --file .tesseract-work/showreel.json`.
 
+Music changes: regenerate `Sources/audio/showreel-music-v1.wav` with `make_music.py`, then
+**package it into the `.tsrct`** (`tsrct project import-asset ... --asset-id music-vN --kind audio`)
+and point the bed layer in `build.py` at that id — export does not read the loose WAV on disk
+if an older asset is still referenced.
+
 ## Structure (cut to 120 BPM: beat 500 ms, bar 2000 ms)
 
 | Time (s) | Scene | Beat logic |

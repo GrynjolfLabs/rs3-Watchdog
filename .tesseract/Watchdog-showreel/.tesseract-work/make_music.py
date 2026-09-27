@@ -9,9 +9,8 @@ Arrangement (bar index b starts at 2*b seconds):
   b2-b6   4-14   drop / main groove (crash + impact at 4.0); arp joins at 10.0
   b7-b8   14-18  drive: rolling 16th bass, beat ticks for the slot reels
   b9      18-20  build 2: no kick, snare roll, riser; silence 19.75-20.0
-  b10-b11 20-24  outro groove under a held chord (impact at 20.0)
-  b12      24-26  same outro groove as b10-b11 (no level drop at 24)
-  24.0           final stab; master tail fades 25.85 -> 26.0
+  b10-b11 20-24  outro groove under held chords (impact at 20.0)
+  24.0           final stab (last hit); no repeat bar — long master fade ~24.4 -> 26.0
 
 Usage: python make_music.py <output.wav>
 """
@@ -324,10 +323,9 @@ def build():
         music.add(pluck(notes[arp_pattern[s]] + 12, level=0.5 + 0.03 * s), t0 + s * S16, gain=0.45)
     fx.add(riser(1.75), t0, gain=0.5)
 
-    # --- b10-b12: outro (20 - 26) under overlapping pads (no drop when bar 12 starts)
+    # --- b10-b11: outro groove (20 - 24) only; tail after 24 is stab + long fade
     music.add(pad("Fm", 2.2), 20.0, gain=0.9)
     music.add(pad("Db", 2.2), 22.0, gain=0.9)
-    music.add(pad("Fm", 2.2), 24.0, gain=0.9)
 
     def outro_groove_bar(b):
         tb = bar_start(b)
@@ -343,14 +341,14 @@ def build():
         for s in range(0, 16, 2):
             music.add(pluck(notes[arp_pattern[s]] + 12, level=0.45), tb + s * S16, gain=0.35, pan=0.4 * np.sin(s))
 
-    for b in (10, 11, 12):
+    for b in (10, 11):
         outro_groove_bar(b)
 
-    # --- 24.0 final stab (layered on the continuing groove)
-    kick_at(24.0, 1.0)
-    music.add(stab("Fm", dur=0.6, cutoff=3000), 24.0, gain=0.7)
-    fx.add(crash(1.0), 24.0, gain=0.22)
-    music.add(bass_note(41, 0.6, cutoff=500), 24.0, gain=0.6)
+    # --- 24.0 final hit, then harmonic tail (no extra bar of drums/arp)
+    music.add(pad("Fm", 2.0, level=0.85), 24.0, gain=0.75)
+    music.add(stab("Fm", dur=0.65, cutoff=3000), 24.0, gain=0.75)
+    fx.add(crash(1.0), 24.0, gain=0.24)
+    music.add(bass_note(41, 0.55, cutoff=480), 24.0, gain=0.58)
 
     music.l *= sidechain
     music.r *= sidechain
@@ -392,9 +390,9 @@ def main():
         master.l[i0:i1] *= fade
         master.r[i0:i1] *= fade
 
-    # tail fade 25.85 -> 26.0 (picture blackout is the main dissolve)
-    i0 = int(25.85 * SR)
-    fade = np.linspace(1, 0, N - i0) ** 2
+    # long tail after the 24s stab (reverb carries; no repeating bar)
+    i0 = int(24.4 * SR)
+    fade = np.linspace(1, 0, N - i0) ** 1.35
     master.l[i0:] *= fade
     master.r[i0:] *= fade
 
