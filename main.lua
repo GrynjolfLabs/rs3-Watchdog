@@ -811,6 +811,7 @@ local LOGIC_TICK_LAST = 0
 local LOGIC_TICK_DELTA = 0
 ---@param logicEvent Logic
 local function onLogic(logicEvent)
+    mux:BeginInputBatch()
     LOGIC_TICK_DELTA = logicEvent.logicTick - LOGIC_TICK_LAST
     pcall(function() runtime:Update(LOGIC_TICK_DELTA) end)
     pcall(function() runtime.toast:Update(LOGIC_TICK_DELTA) end)

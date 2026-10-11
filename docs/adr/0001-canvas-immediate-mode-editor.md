@@ -11,12 +11,26 @@ component's pos/size/font each frame, fighting the layout engine.
 
 ## Consequences
 
-Canvas drawables are inert, so the editor gets no interactivity for free. All input arrives
-through a single full-screen **Capture Layer** component (the only real interactive
-component) forwarding `ONDRAG`/`ONSCROLLWHEEL`/`ONCLICK`/`ONRELEASE`, and every hit-test
-against Nodes, Pins, and Wires is done manually from `Mouse.GetPosition()` in Graph-space —
-the pattern `DevTools/overlay.lua` already uses for its gizmo. Canvas offers no rounded
-rectangle, no circle, and no bezier: Node Bodies are square-cornered, Data Pin Glyphs are
-squares/diamonds, and Wires are bezier curves we tessellate into straight `AddLine`
-segments ourselves. There is also no text caret, so inline Control editing is deferred until
-a text-input workaround is designed (out of the first milestone's scope).
+Canvas drawables are inert, so input arrives through a visually empty Capture Layer.
+It covers the content while idle and expands over the game window during a gesture.
+Native click, hold, hover, release, drag-complete and scroll hooks feed manual hit-tests
+against Nodes, Pins, and Wires. Canvas offers no rounded rectangle, circle, or bezier:
+Node Bodies are square-cornered, Data Pin Glyphs are squares/diamonds, and Wires are
+curves tessellated into straight `AddLine` segments.
+
+Graph and resize gestures use native hook coordinates in interface units. The original
+click selects the target and anchor; HOLD supplies movement; release supplies the final
+position. The View applies canvas zoom. Comparing a queued hook with a newer raw mouse
+poll can invent a scale change, so these paths do not poll or infer OS scale.
+
+`CaptureInput` snapshots the capture origin before each Logic input batch, so expanding
+capture during a click cannot change how queued coordinates are interpreted. A completed
+click can deliver RELEASE before CLICK: retain its endpoint for the batch and finish the
+click immediately when the native `isClicked` flag is false. Both release and drag-complete
+end the gesture, and active capture stays above toolbar and resize controls.
+
+Draw renders the latest delivered pointer; Logic owns double-click timing. Resize hooks
+apply size changes directly, and unchanged bounds do not trigger layout writes. Native
+hook delivery limits movement cadence. Alternate OS/interface scales, release outside
+the client, drag-complete destination coordinates and visual smoothness still need native
+validation. PrettyUI title dragging and other dependency controls retain their own scaling.

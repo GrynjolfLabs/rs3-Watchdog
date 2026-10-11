@@ -78,6 +78,7 @@ require("test_view")
 require("test_wire")
 require("test_canvas_clip")
 require("test_graph_editor")
+require("test_editor_drag")
 require("test_ui_layout")
 require("test_window_chrome")
 

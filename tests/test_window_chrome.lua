@@ -104,7 +104,7 @@ function TestWindowChrome:setUp()
     }
     self.parent = component()
     self.parent:SetSize(1920, 1080)
-    self.window = { root = component(self.parent), titleDrag = component(self.parent) }
+    self.window = { root = component(self.parent), titleDrag = component(self.parent), minWidth = 720, minHeight = 320 }
     self.window.root:SetPos(40, 60)
     self.window.root:SetSize(900, 560)
     function self.window:SetSize(w, h)
@@ -122,15 +122,25 @@ function TestWindowChrome:tearDown()
     self.resize:Destroy()
     ui, prettyui, Mouse, game, Vector4 = self.saved.ui, self.saved.prettyui, self.saved.Mouse, self.saved.game, self.saved.Vector4
 end
+function TestWindowChrome:beginResize()
+    self.mouse.x, self.mouse.y = (self.resize.grip.x + 10) * 2, (self.resize.grip.y + 10) * 2
+    self.resize:BeginInputBatch()
+    self.resize.grip.click(self.resize.grip, 10, 10)
+end
+function TestWindowChrome:holdResize()
+    self.resize:BeginInputBatch()
+    self.resize.grip.hold(self.resize.grip, math.floor(self.mouse.x / 2) - self.resize.grip.x,
+        math.floor(self.mouse.y / 2) - self.resize.grip.y)
+end
 function TestWindowChrome:testResizeUsesInterfaceScaleAndClampsMinimum()
-    self.resize:Begin()
-    self.mouse.x, self.mouse.y = 300, 200
-    self.resize:Drag()
+    self:beginResize()
+    self.mouse.x, self.mouse.y = self.mouse.x + 200, self.mouse.y + 100
+    self:holdResize()
     luaunit.assertEquals({ self.window.root.width, self.window.root.height }, { 1000, 610 })
     self.resize:Finish()
-    self.resize:Begin()
+    self:beginResize()
     self.mouse.x, self.mouse.y = -5000, -5000
-    self.resize:Drag()
+    self:holdResize()
     luaunit.assertEquals({ self.window.root.width, self.window.root.height }, { 720, 320 })
     self.resize:Sync(false)
     luaunit.assertNil(self.resize.start)
@@ -205,7 +215,7 @@ function TestWindowChrome:testModalBlocksEditorInput()
     )
     editor:frontOverlayInteractives()
     editor:update()
-    editor:beginPress()
+    editor:beginPress(50, 50)
     editor:onScroll(1)
     luaunit.assertFalse(editor.pressed)
     luaunit.assertNil(editor.wire)
@@ -289,6 +299,121 @@ function TestWindowChrome:testPaletteStaysAboveResizeGripUntilClosed()
     editor:closePalette()
     self.mux:SyncChrome()
     luaunit.assertEquals(self.overlay.children[#self.overlay.children], self.resize.grip)
-    self.resize:Begin()
+    self:beginResize()
     luaunit.assertNotNil(self.resize.start)
+end
+
+function TestWindowChrome:testStationaryClampedResizeDoesNotRepeatedlyRebuildWindow()
+    self:beginResize()
+    local setSize = self.window.SetSize
+    local calls = 0
+    self.window.SetSize = function(window, w, h)
+        calls = calls + 1
+        setSize(window, w, h)
+    end
+    self.mouse.x, self.mouse.y = -5000, -5000
+    self:holdResize()
+    for _ = 1, 30 do self:holdResize() end
+    luaunit.assertEquals({ self.window.root.width, self.window.root.height }, { 720, 320 })
+    luaunit.assertEquals(calls, 1)
+end
+
+function TestWindowChrome:testSubpixelResizeDoesNotRepeatedlyRebuildWindow()
+    self:beginResize()
+    local calls = 0
+    local setSize = self.window.SetSize
+    self.window.SetSize = function(window, w, h)
+        calls = calls + 1
+        setSize(window, w, h)
+    end
+    self.mouse.x, self.mouse.y = self.mouse.x + 0.8, self.mouse.y + 0.8
+    self:holdResize()
+    for _ = 1, 30 do self:holdResize() end
+    luaunit.assertEquals({ self.window.root.width, self.window.root.height }, { 900, 560 })
+    luaunit.assertEquals(calls, 0)
+end
+
+function TestWindowChrome:testActiveGraphDragRetainsReleaseOverResizeGripAndToolbar()
+    self.overlay:SetSize(0, 0, 1, 1)
+    local function hitAt(x, y)
+        for i = #self.overlay.children, 1, -1 do
+            local c = self.overlay.children[i]
+            if not c.hidden and not c.clickthrough and x >= c.x and y >= c.y
+                and x < c.x + c.width and y < c.y + c.height then return c end
+        end
+    end
+    local editor = Editor.new({}, nil)
+    editor.overlayParent = self.overlay
+    editor.capture = component(self.overlay)
+    editor.capture:SetSize(0, 0, 1, 1)
+    editor.renameButton = { root = component(self.overlay) }
+    editor.renameButton.root:SetPos(100, 60)
+    editor.renameButton.root:SetSize(24, 24)
+    editor.pressed = true
+    self.mux:Push({ id = "editor", FrontOverlayPopups = function() editor:FrontOverlayPopups() end })
+    -- Same order as a native draw: editor restacks, then the shell restacks.
+    for _ = 1, 3 do
+        editor:frontOverlayInteractives()
+        self.mux:SyncChrome()
+        local top = self.overlay.children[#self.overlay.children]
+        luaunit.assertTrue(top == editor.capture, "active graph capture must receive release even over chrome")
+        luaunit.assertTrue(hitAt(self.resize.grip.x + 10, self.resize.grip.y + 10) == editor.capture)
+        luaunit.assertTrue(hitAt(110, 70) == editor.capture)
+    end
+    editor.pressed = false
+    editor:frontOverlayInteractives()
+    self.mux:SyncChrome()
+    luaunit.assertIs(self.overlay.children[#self.overlay.children], self.resize.grip)
+end
+
+function TestWindowChrome:testStationaryResizeCatchupDoesNotInvalidateTitleLayout()
+    self:beginResize()
+    self:holdResize()
+    local title = self.window.titleDrag
+    local setPos, setSize = title.SetPos, title.SetSize
+    local writes = 0
+    function title:SetPos(...) writes = writes + 1; return setPos(self, ...) end
+    function title:SetSize(...) writes = writes + 1; return setSize(self, ...) end
+    -- Trace frame 659 delivered sixteen holds at the same raw pointer before Draw.
+    for _ = 1, 16 do self:holdResize() end
+    self.mux:SyncChrome()
+    luaunit.assertEquals(writes, 0)
+    self.mouse.x = self.mouse.x + 40
+    self:holdResize()
+    luaunit.assertEquals(title.width, 866)
+    luaunit.assertEquals(writes, 1)
+end
+
+function TestWindowChrome:testResizePressAndQueuedHoldIgnoreNewerRawPointer()
+    local gripX, gripY = self.resize.grip.x, self.resize.grip.y
+    self.resize:BeginInputBatch()
+    self.mouse.x, self.mouse.y = 5000, 3000 -- raw poll has outrun the queued press
+    self.resize.grip.click(self.resize.grip, 10, 10)
+    self.resize.grip.hold(self.resize.grip, 10, 10) -- same batch, pre-expansion bounds
+    luaunit.assertEquals({self.window.root.width, self.window.root.height}, {900, 560})
+    self.resize:BeginInputBatch()
+    self.resize.grip.hold(self.resize.grip, gripX + 40, gripY + 30)
+    luaunit.assertEquals({self.window.root.width, self.window.root.height}, {930, 580})
+    -- Release has a final movement; a still-newer raw sample must not extend it.
+    self.resize.grip.release(self.resize.grip, gripX + 45, gripY + 33)
+    luaunit.assertEquals({self.window.root.width, self.window.root.height}, {935, 583})
+    self.mouse.x, self.mouse.y = 6000, 4000
+    self:holdResize()
+    self.mux:SyncChrome()
+    luaunit.assertEquals({self.window.root.width, self.window.root.height}, {935, 583})
+    luaunit.assertNil(self.resize.start)
+end
+
+function TestWindowChrome:testQuickResizeReleaseBeforeClickCannotLatchCapture()
+    local r = self.resize
+    r:BeginInputBatch()
+    r.grip.isClicked = false
+    r.grip.release(r.grip, 40, 30)
+    r.grip.click(r.grip, 10, 10)
+    luaunit.assertNil(r.start)
+    luaunit.assertEquals({self.window.root.width, self.window.root.height}, {930, 580})
+    self.mouse.x, self.mouse.y = 9000, 9000
+    self:holdResize()
+    self.mux:SyncChrome()
+    luaunit.assertEquals({self.window.root.width, self.window.root.height}, {930, 580})
 end

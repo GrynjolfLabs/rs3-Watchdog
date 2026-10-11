@@ -8,7 +8,11 @@ draws what the engine holds and calls back into the engine to mutate it.
 
 The editor is drawn entirely on a single `ui.Canvas` in immediate mode (rebuilt each
 `Event.Draw` frame), because Canvas is the only client primitive whose coordinates the
-plugin fully controls — a prerequisite for pan and zoom.
+plugin fully controls — a prerequisite for pan and zoom. Pointer and button state come
+from native UI hooks in interface units. Draw renders the latest delivered position;
+the Logic clock owns double-click timing, persistence, and capture-origin snapshots for
+each input batch. Native resize hooks apply shell size changes before Draw reads the content bounds.
+Graph and resize gestures do not infer OS scale or poll the raw pointer.
 
 How a build is installed is named here too.
 
@@ -98,9 +102,10 @@ _Avoid_: Database, save system, persistence layer (in prose), serializer (that's
 
 **Capture Layer**:
 A single full-screen, visually-empty interactive component sitting over the Canvas whose
-sole job is to receive raw pointer events (`ONDRAG`, `ONSCROLLWHEEL`, `ONCLICK`,
-`ONRELEASE`) the Canvas cannot, since Canvas drawables are inert. All hit-testing against
-Nodes, Pins, and Wires is done manually from `Mouse.GetPosition()`.
+sole job is to receive native UI events (`ONCLICK`, `ONHOLD`, `ONRELEASE`,
+`ONDRAGCOMPLETE`, hover, and `ONSCROLLWHEEL`) the Canvas cannot, since Canvas drawables
+are inert. All hit-testing against Nodes, Pins, and Wires is done manually from the
+event coordinates, converted through the Capture Layer origin and View transform.
 _Avoid_: Overlay, hit layer, glass pane, input catcher
 
 **Node Body**:

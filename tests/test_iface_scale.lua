@@ -66,23 +66,4 @@ function TestIfaceScale:testInvalidSettingDefaultsToOne()
     luaunit.assertEquals(IfaceScale.Factor(), 1)
 end
 
-function TestIfaceScale:testMeasureAveragesAgreeingAxes()
-    local scale = IfaceScale.Measure(250, 125, 200, 100)
-    luaunit.assertAlmostEquals(scale, 1.25, 1e-9)
-end
-
-function TestIfaceScale:testMeasureRejectsDisagreeingAxes()
-    luaunit.assertNil(IfaceScale.Measure(250, 200, 200, 100))
-end
-
-function TestIfaceScale:testMeasureAcceptsSingleInRangeAxis()
-    local scale = IfaceScale.Measure(300, 5, 200, 10)
-    luaunit.assertAlmostEquals(scale, 1.5, 1e-9)
-end
-
-function TestIfaceScale:testMeasureRejectsOutOfRangeAndNearOrigin()
-    luaunit.assertNil(IfaceScale.Measure(1000, 5, 200, 10))
-    luaunit.assertNil(IfaceScale.Measure(15, 30, 10, 20))
-end
-
 return TestIfaceScale

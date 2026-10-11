@@ -9,7 +9,7 @@ local Wire     = require("ui/wire")
 local Clip     = require("ui/canvas_clip")
 local Palette  = require("ui/palette")
 local ColorPopup = require("ui/color_popup")
-local IfaceScale = require("ui/iface_scale")
+local CaptureInput = require("ui/capture_input")
 local InvViewer = require("ui/inv_viewer")
 
 local Editor = {}
@@ -28,8 +28,7 @@ function Editor.new(registry, runtime)
         nodeOrder = {},            -- draw/z order, front-most last
         geoms = {},                -- per-frame cache, nodeId -> geom
         mouse = { x = 0, y = 0 },
-        screenScale = nil,         -- pixels per interface unit, including OS scale
-        screenScaleIface = nil,    -- InterfaceScale factor the sample was taken under
+        pointer = {},             -- latest native UI event position, in interface units
         pressed = false,
         mode = "idle",             -- idle | pan | dragnode | wire | colordrag | palettescroll
         editing = nil,             -- {nodeId,pinName,spec,widget,field}
@@ -138,6 +137,7 @@ end
 function Editor:syncContentOrigin()
     local p = self.contentParent
     if p == nil then return end
+    local oldX, oldY, oldW, oldH = self.window.x, self.window.y, self.window.w, self.window.h
     pcall(function()
         local x, y = p.x or 0, p.y or 0
         if prettyui ~= nil and prettyui.Tooltip ~= nil and prettyui.Tooltip.getContext ~= nil then
@@ -154,8 +154,11 @@ function Editor:syncContentOrigin()
         self.window.x, self.window.y = x, y
         self.window.w, self.window.h = w, h
     end)
-    self:layoutToolbar()
-    self:layoutTransientEditors()
+    if self.window.x ~= oldX or self.window.y ~= oldY
+        or self.window.w ~= oldW or self.window.h ~= oldH then
+        self:layoutToolbar()
+        self:layoutTransientEditors()
+    end
 end
 
 ---@return ui.ComponentCollection|nil
@@ -182,7 +185,7 @@ function Editor:FrontOverlayTooltips()
 end
 
 function Editor:FrontOverlayPopups()
-    if self.palette.open then
+    if self.pressed or self.palette.open then
         self:frontOverlayInteractives()
     else
         self:FrontOverlayTooltips()
@@ -192,6 +195,8 @@ end
 function Editor:frontOverlayInteractives()
     if dialogOpen(self) then return end
     pcall(function() if self.capture ~= nil then self.capture:MoveToFront() end end)
+    -- Until release, the gesture owns input even over toolbar and resize chrome.
+    if self.pressed then return end
     InvViewer.Front(self)
     pcall(function() if self.paletteCanvas ~= nil then self.paletteCanvas:MoveToFront() end end)
     if self.renameButton ~= nil then self.renameButton.root:MoveToFront() end
@@ -231,28 +236,14 @@ function Editor:layoutTransientEditors()
     end
 end
 
--- Hook x/y are interface units, so raw mouse / that position includes OS scale.
-function Editor:noteScreenScale(component, x, y)
-    if Mouse == nil or Mouse.GetPosition == nil then return end
-    local ok, pos = pcall(function() return Mouse.GetPosition() end)
-    if not ok or pos == nil then return end
-    local originX = component.x or 0
-    local originY = component.y or 0
-    local measured = IfaceScale.Measure(pos.x, pos.y, originX + x, originY + y)
-    if measured == nil then return end
-    self.screenScale = measured
-    self.screenScaleIface = IfaceScale.Factor()
+-- Pointer and button events must share the native UI timeline. Raw polling can
+-- move ahead of queued button transitions and invent motion after release.
+function Editor:notePointer(x, y)
+    self.pointer.x, self.pointer.y = self.captureInput:Position(x, y)
 end
 
 function Editor:mousePos()
-    if Mouse == nil or Mouse.GetPosition == nil then return nil end
-    local ok, pos = pcall(function() return Mouse.GetPosition() end)
-    if not ok or pos == nil then return nil end
-    local scale = self.screenScale
-    if scale ~= nil and self.screenScaleIface == IfaceScale.Factor() then
-        return pos.x / scale, pos.y / scale
-    end
-    return IfaceScale.ToInterface(pos.x, pos.y)
+    return self.pointer.x, self.pointer.y
 end
 
 local function modeLabelOf(nt, key)
@@ -566,13 +557,13 @@ function Editor:deleteNode(nodeId)
     end
 end
 
--- ONHOLD can come from a press elsewhere whose release never reaches this layer.
-function Editor:beginPress()
+-- Native click coordinates identify the original target even if delivery was
+-- delayed by a stalled frame.
+function Editor:beginPress(mx, my)
     if dialogOpen(self) then return end
     if self.pressed or not self.visible then return end
     self:syncContentOrigin()
-    local mx, my = self:mousePos()
-    if mx == nil then return end
+    self.pointer.x, self.pointer.y = mx, my
     local lx, ly = self:toLocal(mx, my)
     self.mouse.x, self.mouse.y = lx, ly
 
@@ -698,16 +689,28 @@ function Editor:beginWire(hit)
 end
 
 function Editor:update()
+    if self.captureInput ~= nil then self.captureInput:BeginBatch() end
     if dialogOpen(self) then
-        self.pressed = false
-        self.mode = "idle"
-        self.wire = nil
-        self.dragNodeId = nil
-        self.colorDragPart = nil
-        self.palette.scrollDragging = false
+        self:cancelPress()
         return
     end
-    self.tick = self.tick + 1   -- advances even without a cursor, for double-click timing
+    self.tick = self.tick + 1 -- Double-click timing stays on the Logic clock.
+end
+
+function Editor:cancelPress()
+    self.pressed = false
+    self.mode = "idle"
+    self.wire = nil
+    self.dragNodeId = nil
+    self.colorDragPart = nil
+    self.palette.scrollDragging = false
+end
+
+function Editor:updatePointer()
+    if dialogOpen(self) then
+        self:cancelPress()
+        return
+    end
     self:syncContentOrigin()
     if self.visible and not self.pressed and not self.palette.open then
         self:positionCapture()
@@ -739,6 +742,7 @@ end
 function Editor:endPress()
     if dialogOpen(self) then return end
     if not self.pressed then return end
+    self:updatePointer()
     self.pressed = false
 
     if self.mode == "wire" and self.wire ~= nil then
@@ -1446,7 +1450,7 @@ end
 
 function Editor:draw()
     if self.canvas == nil or not self.visible then return end
-    self:syncContentOrigin()
+    self:updatePointer()
     pcall(function() self.canvas:MoveToFront() end)
     self:frontOverlayInteractives()
     self.canvas:Clear()
@@ -1523,8 +1527,12 @@ function Editor:positionCapture()
     if self.capture == nil then return end
     local win = self.window
     pcall(function()
-        self.capture:SetPos(win.x, win.y)
-        self.capture:SetSize(win.w, win.h)
+        if self.capture.x ~= win.x or self.capture.y ~= win.y then
+            self.capture:SetPos(win.x, win.y)
+        end
+        if self.capture.width ~= win.w or self.capture.height ~= win.h then
+            self.capture:SetSize(win.w, win.h)
+        end
     end)
 end
 
@@ -1735,17 +1743,31 @@ function Editor:Mount(contentParent, overlayParent)
     self:positionCapture()
 
     if self.capture ~= nil then
-        local function noteScale(component, x, y)
-            self:noteScreenScale(component, x, y)
-        end
-        self.capture:Subscribe(ui.Hook.ONMOUSEOVER, noteScale)
-        self.capture:Subscribe(ui.Hook.ONMOUSEREPEAT, noteScale)
-        self.capture:Subscribe(ui.Hook.ONHOLD, noteScale)
+        self.captureInput = CaptureInput.new(self.capture)
         self.capture:Subscribe(ui.Hook.ONCLICK, function(component, x, y)
-            self:noteScreenScale(component, x, y)
-            self:beginPress()
+            local mx, my = self.captureInput:Position(x, y)
+            self:beginPress(mx, my)
+            -- isClicked is already false when the client delivers a completed
+            -- click after its release. Do the click action without latching a drag.
+            if component.isClicked == false then
+                local released = self.captureInput.release
+                if released ~= nil then self.pointer.x, self.pointer.y = released.x, released.y end
+                self:endPress()
+            end
         end)
-        self.capture:Subscribe(ui.Hook.ONRELEASE, function() self:endPress() end)
+        self.capture:Subscribe(ui.Hook.ONHOLD, function(_, x, y)
+            if self.pressed then self:notePointer(x, y) end
+        end)
+        local function hover(_, x, y)
+            if not self.pressed then self:notePointer(x, y) end
+        end
+        self.capture:Subscribe(ui.Hook.ONMOUSEOVER, hover)
+        self.capture:Subscribe(ui.Hook.ONMOUSEREPEAT, hover)
+        self.capture:Subscribe(ui.Hook.ONRELEASE, function(_, x, y)
+            self.pointer.x, self.pointer.y = self.captureInput:Release(x, y)
+            self:endPress()
+        end)
+        self.capture:Subscribe(ui.Hook.ONDRAGCOMPLETE, function() self:endPress() end)
         self.capture:Subscribe(ui.Hook.ONSCROLLWHEEL, function(_, delta) self:onScroll(delta) end)
     end
 
@@ -1817,6 +1839,8 @@ function Editor:Unmount()
         pcall(function() self.capture:Destroy() end)
         self.capture = nil
     end
+    self.captureInput = nil
+    self.pointer = {}
     if self.zoomTickCanvas ~= nil then
         pcall(function() self.zoomTickCanvas:Destroy() end)
         self.zoomTickCanvas = nil

@@ -1,4 +1,4 @@
-local IfaceScale = require("ui/iface_scale")
+local CaptureInput = require("ui/capture_input")
 local Theme = require("ui/theme")
 
 local Resize = {}
@@ -38,6 +38,8 @@ function Resize.new(window, viewport, chrome)
     local self = setmetatable({ window = window, parent = viewport }, Resize)
     self.grip = ui.Layer.new(chrome)
     self.grip.clickthrough = false
+    self.input = CaptureInput.new(self.grip)
+    self.pointer = {}
     self.label = ui.Canvas.new(self.grip)
     self.label:SetSize(GRIP, GRIP)
     self.label.clickthrough = true
@@ -67,16 +69,24 @@ function Resize.new(window, viewport, chrome)
         self:ToggleMaximize()
         return true
     end)
-    self.grip:Subscribe(ui.Hook.ONCLICK, function()
-        self:Begin()
+    self.grip:Subscribe(ui.Hook.ONCLICK, function(component, x, y)
+        self:Begin(x, y)
+        if component.isClicked == false then
+            local released = self.input.release
+            if released ~= nil then self.pointer.x, self.pointer.y = released.x, released.y end
+            self:Finish()
+        end
         return true
     end)
-    self.grip:Subscribe(ui.Hook.ONHOLD, function()
+    self.grip:Subscribe(ui.Hook.ONHOLD, function(_, x, y)
+        if self.start == nil then return true end
+        self.pointer.x, self.pointer.y = self.input:Position(x, y)
         self:Drag()
         return true
     end)
-    self.grip:Subscribe(ui.Hook.ONRELEASE, function()
-        self:Finish()
+    self.grip:Subscribe(ui.Hook.ONRELEASE, function(_, x, y)
+        self.pointer.x, self.pointer.y = self.input:Release(x, y)
+        if self.start ~= nil then self:Finish() end
         return true
     end)
     self.grip:Subscribe(ui.Hook.ONDRAGCOMPLETE, function()
@@ -121,8 +131,15 @@ function Resize:layoutTitleDrag()
     local root = self.window.root
     local title = self.window.titleDrag
     if title == nil or titleDragExpanded(title) then return end
-    title:SetPos(root.x, root.y)
-    title:SetSize(root.width - CLOSE - MAX, TITLE_H)
+    -- HOLD can run many times at an unchanged pointer while Draw catches up.
+    -- Avoid invalidating native layout again for the same title bounds.
+    if title.x ~= root.x or title.y ~= root.y then
+        title:SetPos(root.x, root.y)
+    end
+    local width = root.width - CLOSE - MAX
+    if title.width ~= width or title.height ~= TITLE_H then
+        title:SetSize(width, TITLE_H)
+    end
 end
 
 function Resize:ToggleMaximize()
@@ -152,16 +169,20 @@ function Resize:ToggleMaximize()
     self:Sync(self.visible)
 end
 
-function Resize:Begin()
+function Resize:BeginInputBatch()
+    self.input:BeginBatch()
+end
+
+function Resize:Begin(x, y)
     if not self.visible or self.normalBounds ~= nil then
         return
     end
-    local mouse = Mouse.GetPosition()
-    if mouse == nil then
-        return
-    end
-    local x, y = IfaceScale.ToInterface(mouse.x, mouse.y)
-    self.start = { x = x, y = y, width = self.window.root.width, height = self.window.root.height }
+    local mx, my = self.input:Position(x, y)
+    self.pointer.x, self.pointer.y = mx, my
+    self.start = {
+        x = mx, y = my,
+        width = self.window.root.width, height = self.window.root.height,
+    }
     self.grip:SetPos(0, 0)
     self.grip:SetSize(0, 0, 1.0, 1.0)
     self.label.hidden = true
@@ -172,17 +193,22 @@ function Resize:Drag()
     if self.start == nil then
         return
     end
-    local mouse = Mouse.GetPosition()
-    if mouse == nil then
-        return
+    -- Match PrettyUI's pixel rounding and bounds before deciding to relayout.
+    local width = math.max(self.window.minWidth,
+        math.floor(self.start.width + (self.pointer.x - self.start.x)))
+    local height = math.max(self.window.minHeight,
+        math.floor(self.start.height + (self.pointer.y - self.start.y)))
+    if self.window.maxWidth ~= nil then width = math.min(width, self.window.maxWidth) end
+    if self.window.maxHeight ~= nil then height = math.min(height, self.window.maxHeight) end
+    if self.window.root.width ~= width or self.window.root.height ~= height then
+        self.window:SetSize(width, height)
     end
-    local x, y = IfaceScale.ToInterface(mouse.x, mouse.y)
-    self.window:SetSize(self.start.width + x - self.start.x, self.start.height + y - self.start.y)
     self:layoutTitleDrag()
     self.grip:MoveToFront()
 end
 
 function Resize:Finish()
+    self:Drag()
     self.start = nil
     self.label.hidden = false
     self:Sync(self.visible)

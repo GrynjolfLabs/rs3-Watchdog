@@ -8,6 +8,10 @@ local Resize = require("ui/window_resize")
 ---@field FrontOverlayPopups fun(self)|nil
 
 ---@class Watchdog.MuxWindow
+---@field minWidth number
+---@field minHeight number
+---@field maxWidth number|nil
+---@field maxHeight number|nil
 ---@field content any
 ---@field Show fun(self)
 ---@field Close fun(self)
@@ -410,6 +414,11 @@ function Multiplexer:RaiseToFront()
         w:MoveToFront()
     end
     self:SyncChrome()
+end
+
+-- Snapshot before native hooks can expand the resize capture.
+function Multiplexer:BeginInputBatch()
+    if self.resizeHandle ~= nil then self.resizeHandle:BeginInputBatch() end
 end
 
 -- Raise popups after the resize handle so it cannot cover them or intercept clicks.
