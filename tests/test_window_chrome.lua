@@ -51,7 +51,8 @@ end
 
 TestWindowChrome = {}
 function TestWindowChrome:setUp()
-    self.saved = { ui = ui, prettyui = prettyui, Mouse = Mouse, game = game, Vector4 = Vector4 }
+    self.saved = { ui = ui, prettyui = prettyui, Mouse = Mouse, game = game, Vector4 = Vector4, config = config }
+    config = { Cursor = { CURSOR_BLANK = { id = 23 } } }
     Vector4 = { new = function(...) return { ... } end }
     ui = {
         Layer = { new = component },
@@ -65,14 +66,31 @@ function TestWindowChrome:setUp()
             return 80
         end,
     }, Window = {} }
-    function prettyui.SimpleButton.new(parent, label, action)
-        local b = { root = component(parent), content = { content = label }, action = action }
-        function b:SetTooltip(options)
-            self.tooltipOptions = options
+    self.nativeButtons = {}
+    local nativeButtons = self.nativeButtons
+    function prettyui.SimpleButton.new(parent, label, action, options)
+        local b = { root = component(parent), content = { content = label }, action = action, options = options }
+        b.tooltip = { root = component(parent), options = {}, width = 240 }
+        b.tooltip.root.hidden = true
+        function b.tooltip:Show()
+            self.root:SetPos(self.options.x, self.options.y)
+            self.root.hidden = false
+        end
+        function b.tooltip:Hide() self.root.hidden = true end
+        function b:SetTooltip(value)
+            self.tooltip.options.text = value
+        end
+        function b:SetDisabled(disabled)
+            self.disabled = disabled
+            self.root.clickthrough = disabled
         end
         function b:Destroy()
+            self.tooltip.root:Destroy()
             self.root:Destroy()
         end
+        b:SetTooltip(options.tooltip.text)
+        b.root:Subscribe(ui.Hook.ONCLICK, function() if not b.disabled then action() end end)
+        nativeButtons[#nativeButtons + 1] = b
         return b
     end
     function prettyui.Window.new(parent, opts)
@@ -139,7 +157,40 @@ function TestWindowChrome:tearDown()
     Dialog.dismissAll(self.overlay)
     Dialog.dismissAll(self.parent)
     self.resize:Destroy()
-    ui, prettyui, Mouse, game, Vector4 = self.saved.ui, self.saved.prettyui, self.saved.Mouse, self.saved.game, self.saved.Vector4
+    ui, prettyui, Mouse, game, Vector4, config = self.saved.ui, self.saved.prettyui, self.saved.Mouse, self.saved.game, self.saved.Vector4, self.saved.config
+end
+function TestWindowChrome:testMaximizeUsesNativeButtonAndToolbarCursor()
+    luaunit.assertEquals(#self.nativeButtons, 1)
+    local button = self.nativeButtons[1]
+    luaunit.assertIs(self.resize.maxHit, button.root)
+    luaunit.assertEquals({ button.options.width, button.options.height }, { 20, 20 })
+    luaunit.assertIs(button.options.hoverCursor, config.Cursor.CURSOR_BLANK)
+    luaunit.assertEquals(button.tooltip.options.text, "Maximize window")
+    luaunit.assertIs(self.resize.maxIcon.parent, button.root)
+    luaunit.assertTrue(self.resize.maxIcon.clickthrough)
+end
+function TestWindowChrome:testButtonClickUpdatesTooltipAndRestoresBounds()
+    self.resize.maxHit.click()
+    luaunit.assertEquals(self.resize.maxButton.tooltip.options.text, "Restore previous size")
+    luaunit.assertEquals({ self.window.root.width, self.window.root.height }, { 1920, 1080 })
+    self.resize.maxHit.click()
+    luaunit.assertEquals(self.resize.maxButton.tooltip.options.text, "Maximize window")
+    luaunit.assertEquals(
+        { self.window.root.x, self.window.root.y, self.window.root.width, self.window.root.height },
+        { 40, 60, 900, 560 }
+    )
+end
+function TestWindowChrome:testModalDisablesButtonAndHidesItsTooltip()
+    self.resize.maxButton.tooltip:Show()
+    local win = Dialog.mount(self.overlay, { title = "Rename" })
+    self.mux:SyncChrome()
+    luaunit.assertTrue(self.resize.maxButton.disabled)
+    luaunit.assertTrue(self.resize.maxButton.tooltip.root.hidden)
+    self.resize.maxHit.click()
+    luaunit.assertNil(self.resize.normalBounds)
+    win:Close()
+    self.mux:SyncChrome()
+    luaunit.assertFalse(self.resize.maxButton.disabled)
 end
 function TestWindowChrome:testResizeUsesInterfaceScaleAndClampsMinimum()
     self.resize:Begin()
@@ -337,14 +388,8 @@ function TestWindowChrome:testSyncChromeRaisesOverlayTooltipAboveMaximize()
     luaunit.assertTrue(positions[self.resize.maxHit] < positions[tipRoot])
 end
 function TestWindowChrome:testTooltipStaysBelowMaximizeAndRestore()
-    local tip = { root = component(self.parent), options = {}, width = 240 }
-    function tip:Show()
-        self.root:SetPos(self.options.x, self.options.y)
-    end
-    function tip:Hide()
-        self.root.hidden = true
-    end
-    self.resize.maxButton.tooltip = tip
+    local tip = self.resize.maxButton.tooltip
+    tip:Show()
     self.resize:Sync(true)
     luaunit.assertEquals({ tip.root.x, tip.root.y }, { 660, 95 })
     self.resize:ToggleMaximize()

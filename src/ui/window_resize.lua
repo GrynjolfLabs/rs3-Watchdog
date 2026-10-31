@@ -14,10 +14,7 @@ local ICON_STROKE = 1
 local ICON = 10
 
 ---@return Vector4
-local function gold(hover)
-    if hover then
-        return Vector4.new(1.0, 0.92, 0.70, 1)
-    end
+local function gold()
     return Vector4.new(0.86, 0.76, 0.53, 1)
 end
 
@@ -26,9 +23,9 @@ end
 ---@param y number
 ---@param size number
 ---@param colour Vector4
-local function drawSquare(canvas, x, y, size, colour)
+local function drawWindow(canvas, x, y, size, colour)
     local x2, y2 = x + size, y + size
-    canvas:AddLine(x, y, x2, y, ICON_STROKE, colour)
+    canvas:AddLine(x, y, x2, y, 2, colour)
     canvas:AddLine(x2, y, x2, y2, ICON_STROKE, colour)
     canvas:AddLine(x2, y2, x, y2, ICON_STROKE, colour)
     canvas:AddLine(x, y2, x, y, ICON_STROKE, colour)
@@ -46,28 +43,19 @@ function Resize.new(window, viewport, chrome)
     for offset = 0, 10, 5 do
         self.label:AddLine(3 + offset, 17, 17, 3 + offset, 1, gripColor)
     end
-    self.maxHit = ui.Layer.new(chrome)
-    self.maxHit.clickthrough = false
+    self.maxButton = prettyui.SimpleButton.new(chrome, "", function()
+        self:ToggleMaximize()
+    end, {
+        width = MAX,
+        height = MAX,
+        tooltip = { text = "Maximize window", placement = "below" },
+        hoverCursor = config.Cursor.CURSOR_BLANK,
+    })
+    self.maxHit = self.maxButton.root
+    self.maxButton.content.hidden = true
     self.maxIcon = ui.Canvas.new(self.maxHit)
     self.maxIcon:SetSize(MAX, MAX)
     self.maxIcon.clickthrough = true
-    self.maxButton = { root = self.maxHit, content = { content = "Maximize" } }
-    function self.maxButton:SetTooltip(options)
-        self.tooltipOptions = options
-    end
-    self.maxHover = false
-    self.maxHit:Subscribe(ui.Hook.ONMOUSEOVER, function()
-        self.maxHover = true
-        self:paintMax()
-    end)
-    self.maxHit:Subscribe(ui.Hook.ONMOUSELEAVE, function()
-        self.maxHover = false
-        self:paintMax()
-    end)
-    self.maxHit:Subscribe(ui.Hook.ONCLICK, function()
-        self:ToggleMaximize()
-        return true
-    end)
     self.grip:Subscribe(ui.Hook.ONCLICK, function()
         self:Begin()
         return true
@@ -91,13 +79,17 @@ end
 
 function Resize:paintMax()
     self.maxIcon:Clear()
-    local c = gold(self.maxHover)
+    local c = gold()
     local pad = (MAX - ICON) * 0.5
     if self.normalBounds ~= nil then
-        drawSquare(self.maxIcon, pad - 1, pad + 2, ICON - 2, c)
-        drawSquare(self.maxIcon, pad + 2, pad - 1, ICON - 2, c)
+        -- Only the exposed edges of the rear window show behind the front one.
+        self.maxIcon:AddLine(pad + 2, pad - 1, pad + ICON, pad - 1, 2, c)
+        self.maxIcon:AddLine(pad + ICON, pad - 1, pad + ICON, pad + ICON - 3, ICON_STROKE, c)
+        self.maxIcon:AddLine(pad + ICON - 2, pad + ICON - 3, pad + ICON, pad + ICON - 3, ICON_STROKE, c)
+        self.maxIcon:AddLine(pad + 2, pad - 1, pad + 2, pad + 1, ICON_STROKE, c)
+        drawWindow(self.maxIcon, pad - 1, pad + 2, ICON - 2, c)
     else
-        drawSquare(self.maxIcon, pad, pad, ICON, c)
+        drawWindow(self.maxIcon, pad, pad, ICON, c)
     end
 end
 
@@ -142,16 +134,14 @@ function Resize:ToggleMaximize()
         self.normalBounds = nil
         root:SetPos(b.x, b.y)
         self.window:SetSize(b.width, b.height)
-        self.maxButton.content.content = "Maximize"
-        self.maxButton:SetTooltip({ text = "Fill the game window" })
+        self.maxButton:SetTooltip("Maximize window")
     else
         local bounds = { x = root.x, y = root.y, width = root.width, height = root.height }
         if not self:FitToParent() then
             return
         end
         self.normalBounds = bounds
-        self.maxButton.content.content = "Restore"
-        self.maxButton:SetTooltip({ text = "Restore previous size and position" })
+        self.maxButton:SetTooltip("Restore previous size")
     end
     self:paintMax()
     self:layoutTitleDrag()
@@ -208,13 +198,14 @@ function Resize:Sync(visible, raise)
     -- A covered control still receives the click unless it opts out of hit testing.
     local blocked = not raise
     self.grip.clickthrough = blocked or self.grip.hidden
-    self.maxHit.clickthrough = blocked or self.maxHit.hidden
+    local buttonDisabled = blocked or not visible
+    if self.maxButton.disabled ~= buttonDisabled then
+        self.maxButton:SetDisabled(buttonDisabled)
+    end
+    if buttonDisabled then self.maxButton.tooltip:Hide() end
     if not visible then
         self.start = nil
         self.label.hidden = false
-        if self.maxButton.tooltip ~= nil and self.maxButton.tooltip.Hide ~= nil then
-            self.maxButton.tooltip:Hide()
-        end
         return
     end
     if self.normalBounds ~= nil then
@@ -247,7 +238,7 @@ function Resize:Sync(visible, raise)
 end
 
 function Resize:Destroy()
-    self.maxHit:Destroy()
+    self.maxButton:Destroy()
     self.grip:Destroy()
 end
 
