@@ -161,6 +161,7 @@ function TestWindowChrome:tearDown()
     Dialog.dismissAll(self.overlay)
     Dialog.dismissAll(self.parent)
     self.resize:Destroy()
+    luaunit.assertTrue(self.resize.maxIcon.destroyed)
     ui, prettyui, Mouse, game, Vector4, config, id = self.saved.ui, self.saved.prettyui, self.saved.Mouse, self.saved.game, self.saved.Vector4, self.saved.config, self.saved.id
 end
 function TestWindowChrome:testMaximizeUsesNativeButtonAndToolbarCursor()
@@ -170,7 +171,7 @@ function TestWindowChrome:testMaximizeUsesNativeButtonAndToolbarCursor()
     luaunit.assertEquals({ button.options.width, button.options.height }, { 20, 20 })
     luaunit.assertIs(button.options.hoverCursor, config.Cursor.CURSOR_BLANK)
     luaunit.assertEquals(button.tooltip.options.text, "Maximize window")
-    luaunit.assertIs(self.resize.maxIcon.parent, button.root)
+    luaunit.assertIs(self.resize.maxIcon.parent, self.overlay)
     luaunit.assertTrue(self.resize.maxIcon.clickthrough)
 end
 function TestWindowChrome:testButtonClickUpdatesTooltipAndRestoresBounds()
@@ -209,6 +210,7 @@ function TestWindowChrome:testResizeUsesInterfaceScaleAndClampsMinimum()
     self.resize:Sync(false)
     luaunit.assertNil(self.resize.start)
     luaunit.assertTrue(self.resize.grip.hidden)
+    luaunit.assertTrue(self.resize.maxIcon.hidden)
 end
 function TestWindowChrome:testMaximizeTracksViewportAndRestoresPreviousBounds()
     self.resize:ToggleMaximize()
@@ -236,6 +238,11 @@ function TestWindowChrome:testChromeFollowsWindowDuringTitleDragRestack()
         { self.resize.maxHit.x, self.resize.maxHit.y, self.resize.maxHit.width, self.resize.maxHit.height },
         { 120 + 900 - 34 - 20, 90 + 7, 20, 20 }
     )
+    luaunit.assertEquals(
+        { self.resize.maxIcon.x, self.resize.maxIcon.y, self.resize.maxIcon.width, self.resize.maxIcon.height },
+        { 120 + 900 - 34 - 20, 90 + 6, 21, 21 }
+    )
+    luaunit.assertFalse(self.resize.maxIcon.hidden)
     luaunit.assertEquals(
         { self.resize.grip.x, self.resize.grip.y },
         { 120 + 900 - 20, 90 + 560 - 20 }
@@ -318,6 +325,7 @@ function TestWindowChrome:testSyncChromeKeepsOverlayModalAboveMaximizeAndGrip()
     local dim = modalDim(self.overlay)
     luaunit.assertNotNil(dim)
     luaunit.assertTrue(positions[self.resize.maxHit] < positions[dim])
+    luaunit.assertTrue(positions[self.resize.maxIcon] < positions[dim])
     luaunit.assertTrue(positions[self.resize.grip] < positions[dim])
     luaunit.assertTrue(positions[dim] < positions[win.root])
 end
@@ -390,6 +398,7 @@ function TestWindowChrome:testSyncChromeRaisesOverlayTooltipAboveMaximize()
         positions[c] = i
     end
     luaunit.assertTrue(positions[self.resize.maxHit] < positions[tipRoot])
+    luaunit.assertTrue(positions[self.resize.maxIcon] < positions[tipRoot])
 end
 function TestWindowChrome:testTooltipKeepsNativePlacementAcrossMaximizeAndRestore()
     local tip = self.resize.maxButton.tooltip

@@ -53,8 +53,9 @@ function Resize.new(window, viewport, chrome)
     self.maxButton.content.hidden = true
     -- Keep SimpleButton's input/tooltip handling, but paint a square frame.
     for _, part in pairs(self.maxButton.parts) do part.hidden = true end
-    self.maxIcon = ui.Canvas.new(self.maxHit)
-    self.maxIcon:SetSize(MAX, MAX)
+    -- The artwork extends above/right of the hit area, like Close's shadow.
+    self.maxIcon = ui.Canvas.new(chrome)
+    self.maxIcon:SetSize(MAX + 1, MAX + 1)
     self.maxIcon.clickthrough = true
     self.grip:Subscribe(ui.Hook.ONCLICK, function()
         self:Begin()
@@ -83,24 +84,31 @@ function Resize:paintMax()
     if self.maxPaintHovered == hovered and self.maxPaintRestoring == restoring then return end
     self.maxPaintHovered, self.maxPaintRestoring = hovered, restoring
     self.maxIcon:Clear()
-    -- Close's outermost left column and bottom row are shadow, not gold.
-    self.maxIcon:AddRectangle(0, 0, 1, MAX, 0x00000055)
-    self.maxIcon:AddRectangle(1, MAX - 1, MAX - 1, 1, 0x00000055)
-    self.maxIcon:AddGradientV(1, 0, MAX - 1, MAX - 1,
+    -- Shadow colours sampled from Close; corners are lighter than the edges.
+    self.maxIcon:AddRectangle(1, 0, MAX - 1, 1, 0x211C19FF)
+    self.maxIcon:AddRectangle(1, MAX, MAX - 1, 1, 0x221D19FF)
+    self.maxIcon:AddRectangle(0, 1, 1, MAX - 1, 0x1F1A17FF)
+    self.maxIcon:AddRectangle(MAX, 1, 1, MAX - 1, 0x241F1BFF)
+    for _, x in ipairs({ 0, MAX }) do
+        for _, y in ipairs({ 0, MAX }) do
+            self.maxIcon:AddRectangle(x, y, 1, 1, 0x2D2923FF)
+        end
+    end
+    self.maxIcon:AddGradientV(1, 1, MAX - 1, MAX - 1,
         hovered and 0x40382CFF or 0x302B24FF,
         hovered and 0x272017FF or 0x17140FFF)
     -- The inset gold edges include the frame's top-left and bottom-right pixels.
-    self.maxIcon:AddRectangle(1, 0, 1, MAX - 1, 0x745D39FF)
-    self.maxIcon:AddRectangle(2, MAX - 2, MAX - 2, 1, 0x745D39FF)
+    self.maxIcon:AddRectangle(1, 1, 1, MAX - 1, 0x745D39FF)
+    self.maxIcon:AddRectangle(2, MAX - 1, MAX - 2, 1, 0x745D39FF)
     if restoring then
         -- Only the exposed edges of the rear window show behind the front one.
-        self.maxIcon:AddRectangle(7, 4, 8, 1, ICON_TOP)
-        self.maxIcon:AddGradientV(15, 4, 1, 9, ICON_TOP, ICON_BOTTOM)
-        self.maxIcon:AddRectangle(7, 5, 1, 2, ICON_TOP)
-        self.maxIcon:AddRectangle(13, 12, 2, 1, ICON_BOTTOM)
-        drawWindow(self.maxIcon, 4, 7, 9)
+        self.maxIcon:AddRectangle(8, 4, 8, 1, ICON_TOP)
+        self.maxIcon:AddGradientV(16, 4, 1, 9, ICON_TOP, ICON_BOTTOM)
+        self.maxIcon:AddRectangle(8, 5, 1, 2, ICON_TOP)
+        self.maxIcon:AddRectangle(14, 12, 2, 1, ICON_BOTTOM)
+        drawWindow(self.maxIcon, 5, 7, 9)
     else
-        drawWindow(self.maxIcon, 4, 4, 12)
+        drawWindow(self.maxIcon, 5, 4, 12)
     end
 end
 
@@ -206,6 +214,7 @@ function Resize:Sync(visible, raise)
     self.visible = visible
     self.grip.hidden = not visible or self.normalBounds ~= nil
     self.maxHit.hidden = not visible
+    self.maxIcon.hidden = not visible
     -- A covered control still receives the click unless it opts out of hit testing.
     local blocked = not raise
     self.grip.clickthrough = blocked or self.grip.hidden
@@ -229,7 +238,11 @@ function Resize:Sync(visible, raise)
     end
     self.maxHit:SetPos(root.x + root.width - CLOSE - MAX, root.y + TITLE_ICON_Y)
     self.maxHit:SetSize(MAX, MAX)
-    if raise then self.maxHit:MoveToFront() end
+    self.maxIcon:SetPos(self.maxHit.x, self.maxHit.y - 1)
+    if raise then
+        self.maxHit:MoveToFront()
+        self.maxIcon:MoveToFront()
+    end
     self:layoutTitleDrag()
     if self.start == nil then
         self.grip:SetPos(root.x + root.width - GRIP, root.y + root.height - GRIP)
@@ -249,6 +262,7 @@ end
 
 function Resize:Destroy()
     self.maxButton:Destroy()
+    self.maxIcon:Destroy()
     self.grip:Destroy()
 end
 
