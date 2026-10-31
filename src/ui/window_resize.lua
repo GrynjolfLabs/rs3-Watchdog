@@ -48,7 +48,7 @@ function Resize.new(window, viewport, chrome)
     end, {
         width = MAX,
         height = MAX,
-        tooltip = { text = "Maximize window", placement = "below" },
+        tooltip = { text = "Maximize window" },
         hoverCursor = config.Cursor.CURSOR_BLANK,
     })
     self.maxHit = self.maxButton.root
@@ -229,8 +229,6 @@ function Resize:Sync(visible, raise)
     end
     local tooltip = self.maxButton.tooltip
     if tooltip ~= nil and tooltip.root ~= nil then
-        tooltip.options.x = math.max(6, root.x + root.width - 40 - (tooltip.width or 0))
-        tooltip.options.y = root.y + TITLE_H + 3
         if not tooltip.root.hidden then
             tooltip:Show()
         end

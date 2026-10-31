@@ -387,14 +387,20 @@ function TestWindowChrome:testSyncChromeRaisesOverlayTooltipAboveMaximize()
     end
     luaunit.assertTrue(positions[self.resize.maxHit] < positions[tipRoot])
 end
-function TestWindowChrome:testTooltipStaysBelowMaximizeAndRestore()
+function TestWindowChrome:testTooltipKeepsNativePlacementAcrossMaximizeAndRestore()
     local tip = self.resize.maxButton.tooltip
+    luaunit.assertNil(self.resize.maxButton.options.tooltip.placement)
     tip:Show()
     self.resize:Sync(true)
-    luaunit.assertEquals({ tip.root.x, tip.root.y }, { 660, 95 })
+    luaunit.assertNil(tip.options.x)
+    luaunit.assertNil(tip.options.y)
     self.resize:ToggleMaximize()
     self.resize:Sync(true)
-    luaunit.assertEquals({ tip.root.x, tip.root.y }, { 1640, 35 })
+    luaunit.assertNil(tip.options.x)
+    luaunit.assertNil(tip.options.y)
+    self.resize:ToggleMaximize()
+    luaunit.assertNil(tip.options.x)
+    luaunit.assertNil(tip.options.y)
     self.resize:Sync(false)
     luaunit.assertTrue(tip.root.hidden)
 end
