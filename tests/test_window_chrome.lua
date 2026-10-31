@@ -45,13 +45,17 @@ local function component(parent)
         self[hook] = callback
     end
     function c:AddLine() end
+    function c:AddSprite() end
+    function c:AddRectangle() end
+    function c:AddGradientV() end
     function c:Clear() end
     return c
 end
 
 TestWindowChrome = {}
 function TestWindowChrome:setUp()
-    self.saved = { ui = ui, prettyui = prettyui, Mouse = Mouse, game = game, Vector4 = Vector4, config = config }
+    self.saved = { ui = ui, prettyui = prettyui, Mouse = Mouse, game = game, Vector4 = Vector4, config = config, id = id }
+    id = { Sprite = { RS3_BTN_MODAL_WINDOW_1_CLOSE_NML = 1, RS3_BTN_MODAL_WINDOW_1_CLOSE_OVR = 2 } }
     config = { Cursor = { CURSOR_BLANK = { id = 23 } } }
     Vector4 = { new = function(...) return { ... } end }
     ui = {
@@ -69,7 +73,7 @@ function TestWindowChrome:setUp()
     self.nativeButtons = {}
     local nativeButtons = self.nativeButtons
     function prettyui.SimpleButton.new(parent, label, action, options)
-        local b = { root = component(parent), content = { content = label }, action = action, options = options }
+        local b = { root = component(parent), content = { content = label }, parts = {}, action = action, options = options }
         b.tooltip = { root = component(parent), options = {}, width = 240 }
         b.tooltip.root.hidden = true
         function b.tooltip:Show()
@@ -157,7 +161,7 @@ function TestWindowChrome:tearDown()
     Dialog.dismissAll(self.overlay)
     Dialog.dismissAll(self.parent)
     self.resize:Destroy()
-    ui, prettyui, Mouse, game, Vector4, config = self.saved.ui, self.saved.prettyui, self.saved.Mouse, self.saved.game, self.saved.Vector4, self.saved.config
+    ui, prettyui, Mouse, game, Vector4, config, id = self.saved.ui, self.saved.prettyui, self.saved.Mouse, self.saved.game, self.saved.Vector4, self.saved.config, self.saved.id
 end
 function TestWindowChrome:testMaximizeUsesNativeButtonAndToolbarCursor()
     luaunit.assertEquals(#self.nativeButtons, 1)

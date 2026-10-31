@@ -10,8 +10,8 @@ local CLOSE = Theme.WINDOW_CLOSE_RESERVE
 local TITLE_H = Theme.WINDOW_HEADER_H
 -- PrettyUI window.lua: close is CLOSE_SIZE at SetPos(..., 7).
 local TITLE_ICON_Y = 7
-local ICON_STROKE = 1
-local ICON = 10
+local ICON_TOP = 0xD7B980FF
+local ICON_BOTTOM = 0x996F42FF
 
 ---@return Vector4
 local function gold()
@@ -22,13 +22,11 @@ end
 ---@param x number
 ---@param y number
 ---@param size number
----@param colour Vector4
-local function drawWindow(canvas, x, y, size, colour)
-    local x2, y2 = x + size, y + size
-    canvas:AddLine(x, y, x2, y, 2, colour)
-    canvas:AddLine(x2, y, x2, y2, ICON_STROKE, colour)
-    canvas:AddLine(x2, y2, x, y2, ICON_STROKE, colour)
-    canvas:AddLine(x, y2, x, y, ICON_STROKE, colour)
+local function drawWindow(canvas, x, y, size)
+    canvas:AddGradientV(x, y, 1, size, ICON_TOP, ICON_BOTTOM)
+    canvas:AddGradientV(x + size - 1, y, 1, size, ICON_TOP, ICON_BOTTOM)
+    canvas:AddRectangle(x + 1, y, size - 2, 1, ICON_TOP)
+    canvas:AddRectangle(x + 1, y + size - 1, size - 2, 1, ICON_BOTTOM)
 end
 
 function Resize.new(window, viewport, chrome)
@@ -53,6 +51,8 @@ function Resize.new(window, viewport, chrome)
     })
     self.maxHit = self.maxButton.root
     self.maxButton.content.hidden = true
+    -- Keep SimpleButton's input/tooltip handling, but use the square Close frame.
+    for _, part in pairs(self.maxButton.parts) do part.hidden = true end
     self.maxIcon = ui.Canvas.new(self.maxHit)
     self.maxIcon:SetSize(MAX, MAX)
     self.maxIcon.clickthrough = true
@@ -78,18 +78,27 @@ function Resize.new(window, viewport, chrome)
 end
 
 function Resize:paintMax()
+    local hovered = not self.maxButton.disabled and (self.maxButton.hovered or self.maxButton.pressed) == true
+    local restoring = self.normalBounds ~= nil
+    if self.maxPaintHovered == hovered and self.maxPaintRestoring == restoring then return end
+    self.maxPaintHovered, self.maxPaintRestoring = hovered, restoring
     self.maxIcon:Clear()
-    local c = gold()
-    local pad = (MAX - ICON) * 0.5
-    if self.normalBounds ~= nil then
+    local frame = hovered and id.Sprite.RS3_BTN_MODAL_WINDOW_1_CLOSE_OVR
+        or id.Sprite.RS3_BTN_MODAL_WINDOW_1_CLOSE_NML
+    self.maxIcon:AddSprite(0, 0, MAX, MAX, frame, 0xFFFFFFFF)
+    -- Cover the red fill and X, preserving the native one-pixel outer edges.
+    self.maxIcon:AddGradientV(1, 1, MAX - 2, MAX - 2,
+        hovered and 0x40382CFF or 0x302B24FF,
+        hovered and 0x272017FF or 0x17140FFF)
+    if restoring then
         -- Only the exposed edges of the rear window show behind the front one.
-        self.maxIcon:AddLine(pad + 2, pad - 1, pad + ICON, pad - 1, 2, c)
-        self.maxIcon:AddLine(pad + ICON, pad - 1, pad + ICON, pad + ICON - 3, ICON_STROKE, c)
-        self.maxIcon:AddLine(pad + ICON - 2, pad + ICON - 3, pad + ICON, pad + ICON - 3, ICON_STROKE, c)
-        self.maxIcon:AddLine(pad + 2, pad - 1, pad + 2, pad + 1, ICON_STROKE, c)
-        drawWindow(self.maxIcon, pad - 1, pad + 2, ICON - 2, c)
+        self.maxIcon:AddRectangle(7, 4, 8, 1, ICON_TOP)
+        self.maxIcon:AddGradientV(15, 4, 1, 9, ICON_TOP, ICON_BOTTOM)
+        self.maxIcon:AddRectangle(7, 5, 1, 2, ICON_TOP)
+        self.maxIcon:AddRectangle(13, 12, 2, 1, ICON_BOTTOM)
+        drawWindow(self.maxIcon, 4, 7, 9)
     else
-        drawWindow(self.maxIcon, pad, pad, ICON, c)
+        drawWindow(self.maxIcon, 4, 4, 12)
     end
 end
 
@@ -202,6 +211,7 @@ function Resize:Sync(visible, raise)
     if self.maxButton.disabled ~= buttonDisabled then
         self.maxButton:SetDisabled(buttonDisabled)
     end
+    self:paintMax()
     if buttonDisabled then self.maxButton.tooltip:Hide() end
     if not visible then
         self.start = nil
