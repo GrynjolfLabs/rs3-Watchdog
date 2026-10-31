@@ -51,7 +51,7 @@ function Resize.new(window, viewport, chrome)
     })
     self.maxHit = self.maxButton.root
     self.maxButton.content.hidden = true
-    -- Keep SimpleButton's input/tooltip handling, but use the square Close frame.
+    -- Keep SimpleButton's input/tooltip handling, but paint a square frame.
     for _, part in pairs(self.maxButton.parts) do part.hidden = true end
     self.maxIcon = ui.Canvas.new(self.maxHit)
     self.maxIcon:SetSize(MAX, MAX)
@@ -83,13 +83,13 @@ function Resize:paintMax()
     if self.maxPaintHovered == hovered and self.maxPaintRestoring == restoring then return end
     self.maxPaintHovered, self.maxPaintRestoring = hovered, restoring
     self.maxIcon:Clear()
-    local frame = hovered and id.Sprite.RS3_BTN_MODAL_WINDOW_1_CLOSE_OVR
-        or id.Sprite.RS3_BTN_MODAL_WINDOW_1_CLOSE_NML
-    self.maxIcon:AddSprite(0, 0, MAX, MAX, frame, 0xFFFFFFFF)
-    -- Cover the red fill and X, preserving the native one-pixel outer edges.
-    self.maxIcon:AddGradientV(1, 1, MAX - 2, MAX - 2,
+    self.maxIcon:AddGradientV(0, 0, MAX, MAX,
         hovered and 0x40382CFF or 0x302B24FF,
         hovered and 0x272017FF or 0x17140FFF)
+    -- Match Close's gold left/bottom trim without carrying over its red edges.
+    -- The top and right edges retain the background colour, including corners.
+    self.maxIcon:AddRectangle(0, 1, 1, MAX - 1, 0x745D39FF)
+    self.maxIcon:AddRectangle(1, MAX - 1, MAX - 2, 1, 0x745D39FF)
     if restoring then
         -- Only the exposed edges of the rear window show behind the front one.
         self.maxIcon:AddRectangle(7, 4, 8, 1, ICON_TOP)
