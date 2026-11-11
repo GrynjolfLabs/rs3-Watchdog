@@ -520,7 +520,12 @@ _Avoid_: Transfer; Backup; "sync" (import is append, not sync); clipboard (no AP
 The lifetime in seconds of a non-sticky visual effect before it auto-expires. A sticky effect
 ignores Hold and remains until dismissed. Shared pin name and semantics across Toast, Popup
 (Popup's Hold is the full-opacity middle of its in/out ramp), Screen Marker, and Object Marker.
-_Avoid_: TTL, duration, timeout (as the pin/prose name)
+Screen Flash has no Hold pin. Its lifetime is Cycles.
+_Avoid_: TTL, duration, timeout (as the pin/prose name). Cycles (that is Screen Flash's count)
+
+**Screen Flash** (`action.screen_flash`):
+An Action that paints a full-screen color pulse on the overlay. Show starts it. Dismiss ends it immediately. Rise and Fall are the two segment lengths in seconds, default 1 and 1. In Shape and Out Shape shape the alpha inside those segments. Instant rise holds peak for the whole Rise. Instant fall holds clear for the whole Fall. Cycles is how many rise-then-fall pairs play, default 3. Cycles of 0, or a negative count, ends the effect before a draw. Sticky ignores Cycles and repeats until Dismiss. A fraction of a cycle ends partway through the next pair. A saved flash with no Sticky value loads sticky. A new flash is not sticky. The starter pack's Screen Flash matches a new one.
+_Avoid_: Hold (seconds on Toast, Popup, and the markers), Dismiss On
 
 **Screen Marker** (`action.screen_marker`):
 An Action that draws a screen-space rectangle outline on the always-on overlay. Authored by a
@@ -542,6 +547,10 @@ Object Marker select additionally hides the Watchdog window (and its overlay cap
 hover is not covered; Esc or the shell key cancels and brings the window back. The shell is restored on a
 successful Select Object. If Watchdog was already hidden by the shell key, it stays hidden.
 _Avoid_: toast, notification, armed banner, overlay prompt
+
+**Player Input** (`trigger.player_input`):
+A Trigger that pulses when any checked local input happens. It listens the whole time its Alert is armed and enabled, and the pulse does not say which input it was. The checks are config on the node. Mouse move is the cursor position changing. Keyboard is a key going down. Mouse click is the minimenu opening, an entry being selected, or the minimenu closing. Each of those events pulses on its own. A new Player Input has all three checks on. The starter pack's Player Input does too. An alert already made from that pack is a saved graph, and its checks migrate with the graph.
+_Avoid_: Activity, Player Activity, Dismiss On, Menu opened, Menu closed
 
 **Chat Trigger**:
 A Trigger Node that fires on the client's `ChatMessage` event. There are two, split by who

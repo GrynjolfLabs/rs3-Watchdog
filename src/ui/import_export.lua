@@ -58,7 +58,7 @@ local function showEveryLine(field)
     if field.overlay ~= nil then roots[#roots + 1] = field.overlay.root end
     for _, root in ipairs(roots) do
         if root ~= nil and root.text ~= nil then
-            root.text.maxLines = 3000
+            root.text.maxLines = -1
         end
     end
 end
