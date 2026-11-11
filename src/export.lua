@@ -212,16 +212,7 @@ end
 local function migrateEntries(version, entries)
     -- Envelope schemaVersion already gated; keep this hook so Import stays mint-then-migrate.
     local _ = version
-    for _, entry in ipairs(entries or {}) do
-        if type(entry) == "table" then
-            if entry.kind == "alert" and type(entry.graph) == "table" then
-                entry.layout = DropDismissOn.Apply(entry.graph, entry.layout)
-            end
-            if entry.children ~= nil then
-                migrateEntries(version, entry.children)
-            end
-        end
-    end
+    DropDismissOn.ApplyEntries(entries)
     return entries
 end
 

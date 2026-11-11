@@ -653,6 +653,7 @@ function Runtime:BindCursorMove(typeKey, filter)
     self._cursorMoves[#self._cursorMoves + 1] = { typeKey = typeKey, filter = filter }
 end
 
+---@return nil
 function Runtime:_fireCursorMoves()
     for _, binding in ipairs(self._cursorMoves) do
         self:_fireBinding(binding, nil)

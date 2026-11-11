@@ -4,6 +4,8 @@ local ScreenFlash = {}
 
 -- A missing or negative length is no time in that segment. The pin default of 1
 -- lives on the node, not here, so a caller that omits a duration gets a zero-length segment.
+---@param value any
+---@return number
 local function nonNegative(value)
     local n = tonumber(value)
     if n == nil or n < 0 then return 0 end
@@ -11,6 +13,9 @@ local function nonNegative(value)
 end
 
 -- `or` would turn a wired 0 into the default. Cycles 0 and Rise 0 are real values.
+---@param value any
+---@param default any
+---@return any
 local function ifNil(value, default)
     if value == nil then return default end
     return value
@@ -26,6 +31,13 @@ Controls.Register("shape", {
 
 local DEFAULT_COLOR = { r = 255, g = 0, b = 0, a = 127 }
 
+---@param elapsed number|nil
+---@param peak number
+---@param inShape string|nil
+---@param outShape string|nil
+---@param rise number|nil
+---@param fall number|nil
+---@return number
 function ScreenFlash.AlphaAt(elapsed, peak, inShape, outShape, rise, fall)
     rise = nonNegative(rise)
     fall = nonNegative(fall)
@@ -46,17 +58,34 @@ function ScreenFlash.AlphaAt(elapsed, peak, inShape, outShape, rise, fall)
     return 0
 end
 
--- Alive while elapsed is still short of Cycles times (Rise + Fall).
+-- Whole pairs take Rise + Fall. The fraction plays only that share of the next Rise.
+-- Rise 1, Fall 1, Cycles 2.5 ends at 4.5s. Two full pairs, then half of the next Rise.
 -- Sticky stays live at any elapsed time. Only Dismiss stops it, and Dismiss does not call this.
--- A negative Rise, Fall, or Cycles counts as 0.
+-- A negative Rise, Fall, or Cycles counts as 0. A zero Rise adds no time for the fraction.
+---@param elapsed number|nil
+---@param rise number|nil
+---@param fall number|nil
+---@param cycles number|nil
+---@param sticky boolean|nil
+---@return boolean
 function ScreenFlash.IsLive(elapsed, rise, fall, cycles, sticky)
     if sticky then return true end
     rise = nonNegative(rise)
     fall = nonNegative(fall)
     cycles = nonNegative(cycles)
-    return (tonumber(elapsed) or 0) < cycles * (rise + fall)
+    local pairs = math.floor(cycles)
+    local endsAt = pairs * (rise + fall) + (cycles - pairs) * rise
+    return (tonumber(elapsed) or 0) < endsAt
 end
 
+---@param color { r: integer, g: integer, b: integer, a: integer|nil }|nil
+---@param inShape string|nil
+---@param outShape string|nil
+---@param rise number|nil
+---@param fall number|nil
+---@param cycles number|nil
+---@param sticky boolean|nil
+---@return { kind: string, state: { elapsed: number, alpha: number }, update: (fun(dt: number): boolean), draw: fun(canvas: any) }
 function ScreenFlash.BuildHandle(color, inShape, outShape, rise, fall, cycles, sticky)
     local peak = (color ~= nil and color.a) or 255
     local state = { elapsed = 0, alpha = 0 }

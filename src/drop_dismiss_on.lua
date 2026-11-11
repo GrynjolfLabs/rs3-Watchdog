@@ -6,6 +6,9 @@ local Theme = require("src/ui/theme")
 
 local DropDismissOn = {}
 
+---@param graph LibNodeGraph.SerializedGraph
+---@param layout Watchdog.LayoutArray|nil
+---@return integer
 local function maxId(graph, layout)
     local maxId = 0
     local function consider(id)
@@ -20,6 +23,9 @@ local function maxId(graph, layout)
     return maxId
 end
 
+---@param layout Watchdog.LayoutArray|nil
+---@param id integer
+---@return { id: integer, x: number, y: number }|nil
 local function positionOf(layout, id)
     for _, pos in ipairs(layout or {}) do
         if type(pos) == "table" and pos.id == id then return pos end
@@ -36,6 +42,10 @@ local INPUT_FOR = {
 }
 
 -- A missing check would load as on. False has to be stored.
+---@param graph LibNodeGraph.SerializedGraph
+---@param layout Watchdog.LayoutArray|nil
+---@param flash LibNodeGraph.SerializedNode
+---@param checks { mouseMove: boolean, keyboard: boolean }
 local function addPlayerInput(graph, layout, flash, checks)
     local id = maxId(graph, layout) + 1
     graph.nodes[#graph.nodes + 1] = {
@@ -98,6 +108,21 @@ function DropDismissOn.Apply(graph, layout)
         end
     end
     return layout
+end
+
+-- Bucket load and Import both rewrite every alert, including one nested in a group.
+---@param entries (Watchdog.Entry|Watchdog.ExportEntry)[]|nil
+function DropDismissOn.ApplyEntries(entries)
+    for _, entry in ipairs(entries or {}) do
+        if type(entry) == "table" then
+            if entry.kind == "alert" and type(entry.graph) == "table" then
+                entry.layout = DropDismissOn.Apply(entry.graph, entry.layout)
+            end
+            if entry.children ~= nil then
+                DropDismissOn.ApplyEntries(entry.children)
+            end
+        end
+    end
 end
 
 return DropDismissOn

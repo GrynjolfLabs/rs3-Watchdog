@@ -18,6 +18,8 @@ local GraphConfig = {}
 
 local installed = false
 
+---@param value any
+---@return any
 local function copyDefault(value)
     if type(value) ~= "table" then
         return value
@@ -68,6 +70,7 @@ local function rememberConfig(registry)
     end
 end
 
+---@param registry LibNodeGraph.Registry
 local function keepConfigOnNodes(registry)
     local probe = LibNodeGraph.NewGraph(registry)
     local Graph = getmetatable(probe)

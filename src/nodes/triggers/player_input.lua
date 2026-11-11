@@ -12,6 +12,8 @@ local CHECKS = {
     { name = "mouseClick", label = "Mouse click" },
 }
 
+---@param checks { name: string, label: string }[]
+---@return LibNodeGraph.ConfigDef[]
 local function configOf(checks)
     local config = {}
     for _, check in ipairs(checks) do
@@ -43,6 +45,8 @@ function PlayerInput.Register(registry, runtime)
         end,
     })
 
+    ---@param name string
+    ---@return fun(payload: any, node: Watchdog.NodeHandle, graph: LibNodeGraph.Graph): boolean
     local function checkOn(name)
         return function(_, node)
             return node.GetControl(name) == true

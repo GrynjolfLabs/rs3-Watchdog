@@ -535,14 +535,7 @@ end
 -- A missing Sticky is still missing at this point; AddNode would fill it false.
 ---@param entries Watchdog.Entry[]|nil
 local function migrateSavedGraphs(entries)
-    for _, entry in ipairs(entries or {}) do
-        if type(entry) == "table" then
-            if entry.kind == "alert" and type(entry.graph) == "table" then
-                entry.layout = DropDismissOn.Apply(entry.graph, entry.layout)
-            end
-            migrateSavedGraphs(entry.children)
-        end
-    end
+    DropDismissOn.ApplyEntries(entries)
 end
 
 -- A tag-only name would draw a blank row.

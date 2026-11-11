@@ -247,51 +247,74 @@ function Node.BuildGeometry(pins, x, y, width, opts)
         text = text or ""
         return Theme.TextWidth(12, text) or (#text * Theme.CONTROL_LABEL_CHAR_W)
     end
+
+    -- `left` is already past the row's own label. A pin label starts after the glyph.
+    -- A config check has no glyph, so that caller passes the margin instead.
+    -- The box then stops short of an output label on the same row.
+    ---@param pinControl { Layout: fun(band: table): table|nil, Inline: boolean }
+    ---@param name string
+    ---@param defaultValue any
+    ---@param left number
+    ---@param cy number
+    ---@param outPin { label: string|nil, name: string|nil }|nil
+    local function layoutInline(pinControl, name, defaultValue, left, cy, outPin)
+        local rightInset = Theme.CONTROL_PAD_X
+        if outPin ~= nil then
+            local outLabel = outPin.label or outPin.name or ""
+            rightInset = Theme.PIN_GLYPH * 0.5 + Theme.PIN_LABEL_GAP
+                + labelWidth(outLabel) + Theme.CONTROL_LABEL_GAP
+        end
+        local right = width - Theme.PIN_MARGIN_X - rightInset
+        if outPin == nil and right < left + Theme.CONTROL_MIN_W then
+            right = left + Theme.CONTROL_MIN_W
+        end
+        if right < left then right = left end
+        local rects = pinControl.Layout({
+            x = left, y = cy - Theme.CONTROL_H * 0.5, w = right - left, h = Theme.CONTROL_H,
+        }) or {}
+        for _, r in ipairs(rects) do
+            geom.controls[#geom.controls + 1] = {
+                pinName = name,
+                pinControl = pinControl,
+                default = defaultValue,
+                -- `kind`/`axis` name the sub-rect for the Editor's press + isEditingThis skip.
+                -- How it paints is the Pin Control's Draw, not a discriminator the Node reads.
+                kind = r.kind, axis = r.axis,
+                enabled = r.enabled,          -- a mode checkbox row's toggle-ability
+                placeholder = r.placeholder,  -- e.g. the matcher needle's / capture's empty-state hint
+                x = r.x, y = r.y, w = r.w, h = r.h,
+            }
+        end
+    end
+
     for i, pin in ipairs(placeholder and {} or inputs) do
         local pinControl = pinControlFor(pin, connected, typeKey)
         if pinControl ~= nil then
-            local rects
             if pinControl.Inline then
-                -- Past the input label, and short of the output label on this row. That label
-                -- is right-aligned against the glyph: half a glyph, the pin gap, then the text.
                 local label = pin.label or pin.name or ""
                 local left = labelStart + labelWidth(label) + Theme.CONTROL_LABEL_GAP
-                local rightInset = Theme.CONTROL_PAD_X
-                local outPin = outputs[i]
-                if outPin ~= nil then
-                    local outLabel = outPin.label or outPin.name or ""
-                    rightInset = Theme.PIN_GLYPH * 0.5 + Theme.PIN_LABEL_GAP
-                        + labelWidth(outLabel) + Theme.CONTROL_LABEL_GAP
-                end
-                local right = width - Theme.PIN_MARGIN_X - rightInset
-                if outPin == nil and right < left + Theme.CONTROL_MIN_W then
-                    right = left + Theme.CONTROL_MIN_W
-                end
-                if right < left then right = left end
                 local cy = rowTop[i] + Theme.PIN_ROW_HEIGHT * 0.5
-                rects = pinControl.Layout({
-                    x = left, y = cy - Theme.CONTROL_H * 0.5, w = right - left, h = Theme.CONTROL_H,
-                }) or {}
+                layoutInline(pinControl, pin.name, pin.default, left, cy, outputs[i])
             else
                 local extraH = pinControl.ReservedHeight(pin) or 0
                 local band = {
                     x = Theme.PIN_MARGIN_X, y = rowTop[i + 1] - extraH,
                     w = width - Theme.PIN_MARGIN_X * 2, h = extraH,
                 }
-                rects = pinControl.Layout(band) or {}
-            end
-            for _, r in ipairs(rects) do
-                geom.controls[#geom.controls + 1] = {
-                    pinName    = pin.name,
-                    pinControl = pinControl,
-                    default    = pin.default,
-                    -- `kind`/`axis` name the sub-rect for the Editor's press + isEditingThis skip;
-                    -- how it PAINTS is the Pin Control's Draw, not a discriminator the Node reads.
-                    kind = r.kind, axis = r.axis,
-                    enabled = r.enabled,          -- a mode checkbox row's toggle-ability
-                    placeholder = r.placeholder,  -- e.g. the matcher needle's / capture's empty-state hint
-                    x = r.x, y = r.y, w = r.w, h = r.h,
-                }
+                local rects = pinControl.Layout(band) or {}
+                for _, r in ipairs(rects) do
+                    geom.controls[#geom.controls + 1] = {
+                        pinName    = pin.name,
+                        pinControl = pinControl,
+                        default    = pin.default,
+                        -- `kind`/`axis` name the sub-rect for the Editor's press + isEditingThis skip;
+                        -- how it PAINTS is the Pin Control's Draw, not a discriminator the Node reads.
+                        kind = r.kind, axis = r.axis,
+                        enabled = r.enabled,          -- a mode checkbox row's toggle-ability
+                        placeholder = r.placeholder,  -- e.g. the matcher needle's / capture's empty-state hint
+                        x = r.x, y = r.y, w = r.w, h = r.h,
+                    }
+                end
             end
         end
     end
@@ -313,32 +336,7 @@ function Node.BuildGeometry(pins, x, y, width, opts)
         })
         if pinControl ~= nil and pinControl.Inline then
             local left = Theme.PIN_MARGIN_X + labelWidth(label) + Theme.CONTROL_LABEL_GAP
-            local rightInset = Theme.CONTROL_PAD_X
-            local outPin = outputs[row]
-            if outPin ~= nil then
-                local outLabel = outPin.label or outPin.name or ""
-                rightInset = Theme.PIN_GLYPH * 0.5 + Theme.PIN_LABEL_GAP
-                    + labelWidth(outLabel) + Theme.CONTROL_LABEL_GAP
-            end
-            local right = width - Theme.PIN_MARGIN_X - rightInset
-            if outPin == nil and right < left + Theme.CONTROL_MIN_W then
-                right = left + Theme.CONTROL_MIN_W
-            end
-            if right < left then right = left end
-            local rects = pinControl.Layout({
-                x = left, y = cy - Theme.CONTROL_H * 0.5, w = right - left, h = Theme.CONTROL_H,
-            }) or {}
-            for _, r in ipairs(rects) do
-                geom.controls[#geom.controls + 1] = {
-                    pinName = cfg.name,
-                    pinControl = pinControl,
-                    default = cfg.default,
-                    kind = r.kind, axis = r.axis,
-                    enabled = r.enabled,
-                    placeholder = r.placeholder,
-                    x = r.x, y = r.y, w = r.w, h = r.h,
-                }
-            end
+            layoutInline(pinControl, cfg.name, cfg.default, left, cy, outputs[row])
         end
     end
 
@@ -434,6 +432,21 @@ function Node.Draw(canvas, view, geom, meta, opts)
 
     local hs = view:Scale(Theme.PIN_GLYPH) * 0.5
     local labelFont = showLabels and Theme.Font(12 * view.zoom) or nil
+    -- Same baseline for a pin label and a config check. Callers pass x, because a pin
+    -- sits past its glyph and a check starts at the margin.
+    ---@param text string
+    ---@return number
+    local function labelPixelWidth(text)
+        return Theme.TextWidth(12 * view.zoom, text) or (#text * view:Scale(7))
+    end
+    ---@param x number
+    ---@param centerY number
+    ---@param text string
+    ---@param tw number
+    local function drawLabel(x, centerY, text, tw)
+        canvas:AddText(x, centerY - view:Scale(7), tw, 0, text,
+            createTextDataConfig(labelFont, Theme.Vec4(Theme.COL_PIN_LABEL)))
+    end
     for _, pin in ipairs(geom.pins) do
         local pcx, pcy = view:ToScreen(geom.x + pin.cx, geom.y + pin.cy)
 
@@ -447,20 +460,15 @@ function Node.Draw(canvas, view, geom, meta, opts)
         end
 
         if labelFont ~= nil then
-            local labelCol = Theme.Vec4(Theme.COL_PIN_LABEL)
-            local ty = pcy - view:Scale(7)
-            local tw = Theme.TextWidth(12 * view.zoom, pin.label) or (#pin.label * view:Scale(7))
-            local textData = createTextDataConfig(labelFont, labelCol)
+            local tw = labelPixelWidth(pin.label)
             if pin.direction == "in" then
                 -- An exec-in pin's label is pushed right to clear its test button (labelInset,
                 -- set in BuildGeometry); every other pin has no inset.
                 local inset = Theme.PIN_LABEL_GAP + (pin.labelInset or 0)
-                canvas:AddText(pcx + hs + view:Scale(inset), ty,
-                    tw, 0, pin.label, textData)
+                drawLabel(pcx + hs + view:Scale(inset), pcy, pin.label, tw)
             else
                 -- Right-align output labels against the glyph (measured at the drawn size).
-                canvas:AddText(pcx - hs - view:Scale(Theme.PIN_LABEL_GAP) - tw, ty,
-                    tw, 0, pin.label, textData)
+                drawLabel(pcx - hs - view:Scale(Theme.PIN_LABEL_GAP) - tw, pcy, pin.label, tw)
             end
         end
     end
@@ -468,10 +476,7 @@ function Node.Draw(canvas, view, geom, meta, opts)
     for _, row in ipairs(geom.configLabels or {}) do
         if labelFont ~= nil then
             local tx, ty = view:ToScreen(geom.x + row.x, geom.y + row.cy)
-            ty = ty - view:Scale(7)
-            local tw = Theme.TextWidth(12 * view.zoom, row.label) or (#row.label * view:Scale(7))
-            local textData = createTextDataConfig(labelFont, Theme.Vec4(Theme.COL_PIN_LABEL))
-            canvas:AddText(tx, ty, tw, 0, row.label, textData)
+            drawLabel(tx, ty, row.label, labelPixelWidth(row.label))
         end
     end
 

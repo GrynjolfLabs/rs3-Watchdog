@@ -103,11 +103,16 @@ function TestScreenFlashLifetime:testStickyIgnoresCyclesUntilDismiss()
     luaunit.assertTrue(ScreenFlash.IsLive(0, 0, 0, 0, true))
 end
 
--- 1.5 pairs of 2s+2s end at 6s, inside the second pair. That pair would have run to 8s.
+-- One full pair of Rise 2 and Fall 2 is 4s. Half of the next Rise is 1s, so 1.5 ends at 5s.
 function TestScreenFlashLifetime:testFractionEndsInsideTheNextPair()
-    luaunit.assertTrue(ScreenFlash.IsLive(4, 2, 2, 1.5, false))
-    luaunit.assertTrue(ScreenFlash.IsLive(5.5, 2, 2, 1.5, false))
-    luaunit.assertFalse(ScreenFlash.IsLive(6, 2, 2, 1.5, false))
+    luaunit.assertTrue(ScreenFlash.IsLive(4.999, 2, 2, 1.5, false))
+    luaunit.assertFalse(ScreenFlash.IsLive(5, 2, 2, 1.5, false))
+end
+
+-- Two full pairs of Rise 1 and Fall 1 are 4s. Half of the next Rise is 0.5s, so 2.5 ends at 4.5s.
+function TestScreenFlashLifetime:testTwoAndAHalfCyclesEndHalfwayThroughTheNextRise()
+    luaunit.assertTrue(ScreenFlash.IsLive(4.499, 1, 1, 2.5, false))
+    luaunit.assertFalse(ScreenFlash.IsLive(4.5, 1, 1, 2.5, false))
 end
 
 function TestScreenFlashLifetime:testZeroCyclesEndsBeforeADraw()
