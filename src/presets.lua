@@ -5,6 +5,7 @@
 local ControlKinds = require("src/ui/control_kinds")
 local Util = require("src/util")
 local Text = require("src/text")
+local DropDismissOn = require("src/drop_dismiss_on")
 
 local Presets = {}
 
@@ -93,6 +94,11 @@ function Presets.Load()
         if type(preset) == "table" and type(preset.name) == "string" then
             local stripped = Text.StripTags(preset.name)
             preset.name = stripped ~= "" and stripped or "Preset"
+        end
+        -- Same raw document Bucket load rewrites. Instantiate reads this result,
+        -- so it does not migrate a second time.
+        if type(preset) == "table" and type(preset.graph) == "table" then
+            preset.layout = DropDismissOn.Apply(preset.graph, preset.layout)
         end
     end
     return doc, nil

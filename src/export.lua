@@ -10,6 +10,7 @@
 local Store = require("src/store")
 local Compress = require("src/compress")
 local Text = require("src/text")
+local DropDismissOn = require("src/drop_dismiss_on")
 
 local Export = {}
 
@@ -211,6 +212,16 @@ end
 local function migrateEntries(version, entries)
     -- Envelope schemaVersion already gated; keep this hook so Import stays mint-then-migrate.
     local _ = version
+    for _, entry in ipairs(entries or {}) do
+        if type(entry) == "table" then
+            if entry.kind == "alert" and type(entry.graph) == "table" then
+                entry.layout = DropDismissOn.Apply(entry.graph, entry.layout)
+            end
+            if entry.children ~= nil then
+                migrateEntries(version, entry.children)
+            end
+        end
+    end
     return entries
 end
 

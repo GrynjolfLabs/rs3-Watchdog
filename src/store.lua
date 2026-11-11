@@ -10,6 +10,7 @@
 
 local Util = require("src/util")
 local Text = require("src/text")
+local DropDismissOn = require("src/drop_dismiss_on")
 
 local Store = {}
 
@@ -530,6 +531,20 @@ function Store.GetInfoBoxAnchor(doc)
     return a.x, a.y
 end
 
+-- Dismiss On is read here, on the saved document, before RestoreAll deserializes.
+-- A missing Sticky is still missing at this point; AddNode would fill it false.
+---@param entries Watchdog.Entry[]|nil
+local function migrateSavedGraphs(entries)
+    for _, entry in ipairs(entries or {}) do
+        if type(entry) == "table" then
+            if entry.kind == "alert" and type(entry.graph) == "table" then
+                entry.layout = DropDismissOn.Apply(entry.graph, entry.layout)
+            end
+            migrateSavedGraphs(entry.children)
+        end
+    end
+end
+
 -- A tag-only name would draw a blank row.
 ---@param entries Watchdog.Entry[]|nil
 local function stripEntryNames(entries)
@@ -579,6 +594,7 @@ function Store.LoadKey(key)
     doc.version = doc.version or DOC_VERSION
     doc.entries = doc.entries or {}
     stripEntryNames(doc.entries)
+    migrateSavedGraphs(doc.entries)
     return doc
 end
 

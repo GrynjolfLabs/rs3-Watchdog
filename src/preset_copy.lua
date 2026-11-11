@@ -3,6 +3,7 @@
 
 local Store = require("src/store")
 local Presets = require("src/presets")
+local DropDismissOn = require("src/drop_dismiss_on")
 local ControlKinds = require("src/ui/control_kinds")
 local Text = require("src/text")
 local NumberField = require("src/ui/widgets/number_field")
@@ -205,6 +206,11 @@ function PresetCopy.InstantiateSnapshot(bucket, snapshot, registry, answers)
     end
     if type(snapshot) ~= "table" then
         return nil, nil, nil, "Could not copy the preset graph."
+    end
+    -- Pack snapshots are not read by Presets.Load. Rewrite the saved graph
+    -- before Deserialize fills Sticky false and drops a removed Dismiss On.
+    if type(snapshot.graph) == "table" then
+        snapshot.layout = DropDismissOn.Apply(snapshot.graph, snapshot.layout)
     end
     return copyGraph(
         bucket, snapshot.name, snapshot.graph, snapshot.layout, snapshot.variables,

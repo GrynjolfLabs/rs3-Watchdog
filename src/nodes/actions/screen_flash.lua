@@ -24,16 +24,6 @@ Controls.Register("shape", {
     },
 })
 
-Controls.Register("dismissOn", {
-    widget = "enum",
-    choices = {
-        { value = "none",     label = "None" },
-        { value = "mouse",    label = "Mouse" },
-        { value = "keyboard", label = "Keyboard" },
-        { value = "both",     label = "Both" },
-    },
-})
-
 local DEFAULT_COLOR = { r = 255, g = 0, b = 0, a = 127 }
 
 function ScreenFlash.AlphaAt(elapsed, peak, inShape, outShape, rise, fall)
@@ -67,26 +57,13 @@ function ScreenFlash.IsLive(elapsed, rise, fall, cycles, sticky)
     return (tonumber(elapsed) or 0) < cycles * (rise + fall)
 end
 
-function ScreenFlash.ShouldAutoDismiss(dismissOn, baseline, runtimeTicks)
-    if dismissOn == "none" or dismissOn == nil then return false end
-    local moved = runtimeTicks.mouse ~= baseline.mouse
-    local pressed = runtimeTicks.keyboard ~= baseline.keyboard
-    if dismissOn == "mouse" then return moved end
-    if dismissOn == "keyboard" then return pressed end
-    return moved or pressed
-end
-
-function ScreenFlash.BuildHandle(color, inShape, outShape, rise, fall, cycles, sticky, dismissOn, baseline, runtime)
+function ScreenFlash.BuildHandle(color, inShape, outShape, rise, fall, cycles, sticky)
     local peak = (color ~= nil and color.a) or 255
     local state = { elapsed = 0, alpha = 0 }
     return {
         kind = "screen_flash",
         state = state,
         update = function(dt)
-            if ScreenFlash.ShouldAutoDismiss(dismissOn, baseline,
-                { mouse = runtime.mouseActivityTick, keyboard = runtime.keyboardActivityTick }) then
-                return false
-            end
             state.elapsed = state.elapsed + (tonumber(dt) or 0)
             if not ScreenFlash.IsLive(state.elapsed, rise, fall, cycles, sticky) then
                 return false
@@ -131,8 +108,6 @@ function ScreenFlash.Register(registry, runtime)
               default = 3, label = "Cycles" },
             { name = "sticky", kind = "data", direction = "in", dataType = "bool",
               default = false, label = "Sticky" },
-            { name = "dismissOn", kind = "data", direction = "in", dataType = "dismissOn",
-              default = "both", label = "Dismiss On" },
         },
         run = function(ctx)
             ctx.state = ctx.state or {}
@@ -160,11 +135,9 @@ function ScreenFlash.Register(registry, runtime)
             local fall = ifNil(ctx:In("fall"), 1)
             local cycles = ifNil(ctx:In("cycles"), 3)
             local sticky = ctx:In("sticky") and true or false
-            local dismissOn = ctx:In("dismissOn") or "both"
-            local baseline = { mouse = runtime.mouseActivityTick, keyboard = runtime.keyboardActivityTick }
 
             local handle = ScreenFlash.BuildHandle(
-                color, inShape, outShape, rise, fall, cycles, sticky, dismissOn, baseline, runtime)
+                color, inShape, outShape, rise, fall, cycles, sticky)
             state.handle = handle
             runtime.effects:PushStack(state, handle, 1)
         end,

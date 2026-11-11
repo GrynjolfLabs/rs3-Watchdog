@@ -1,4 +1,4 @@
--- Screen Flash pulse shape, counted lifetime, pin list, and Dismiss On.
+-- Screen Flash pulse shape, counted lifetime, and pin list.
 -- No Canvas. Show, Dismiss, and two-node independence go through the real effect registry.
 
 local luaunit = require("luaunit")
@@ -130,10 +130,7 @@ local function pulse(inShape, outShape)
     return ScreenFlash.BuildHandle(
         { r = 255, g = 0, b = 0, a = 200 },
         inShape, outShape,
-        1, 1, 3, false,
-        "none",
-        { mouse = 0, keyboard = 0 },
-        { mouseActivityTick = 0, keyboardActivityTick = 0 })
+        1, 1, 3, false)
 end
 
 function TestScreenFlashClock:testSameWallTimeFromDifferentFrameSplits()
@@ -160,10 +157,7 @@ function TestScreenFlashClock:testNonStickyHandleEndsWhenElapsedReachesTheCycleC
     local handle = ScreenFlash.BuildHandle(
         { r = 255, g = 0, b = 0, a = 200 },
         "instant", "instant",
-        1, 1, 1, false,
-        "none",
-        { mouse = 0, keyboard = 0 },
-        { mouseActivityTick = 0, keyboardActivityTick = 0 })
+        1, 1, 1, false)
     luaunit.assertTrue(handle.update(1.5))
     luaunit.assertEquals(handle.state.alpha, 0)
     luaunit.assertFalse(handle.update(0.5))
@@ -172,9 +166,7 @@ end
 function TestScreenFlashClock:testHandleAlphaFollowsTheRiseAndFallDurations()
     local handle = ScreenFlash.BuildHandle(
         { a = 200 }, "fade", "fade",
-        4, 4, 1, false, "none",
-        { mouse = 0, keyboard = 0 },
-        { mouseActivityTick = 0, keyboardActivityTick = 0 })
+        4, 4, 1, false)
     luaunit.assertTrue(handle.update(2))
     luaunit.assertEquals(handle.state.alpha, 100)
     luaunit.assertTrue(handle.update(4))
@@ -185,51 +177,29 @@ end
 function TestScreenFlashClock:testZeroCyclesAndAZeroLengthCycleEndBeforeADraw()
     local zeroCount = ScreenFlash.BuildHandle(
         { a = 200 }, "instant", "instant",
-        1, 1, 0, false, "none",
-        { mouse = 0, keyboard = 0 },
-        { mouseActivityTick = 0, keyboardActivityTick = 0 })
+        1, 1, 0, false)
     luaunit.assertFalse(zeroCount.update(0.016))
     luaunit.assertEquals(zeroCount.state.alpha, 0)
 
     local zeroLength = ScreenFlash.BuildHandle(
         { a = 200 }, "instant", "instant",
-        0, 0, 3, false, "none",
-        { mouse = 0, keyboard = 0 },
-        { mouseActivityTick = 0, keyboardActivityTick = 0 })
+        0, 0, 3, false)
     luaunit.assertFalse(zeroLength.update(0.016))
 
     local negative = ScreenFlash.BuildHandle(
         { a = 200 }, "instant", "instant",
-        -2, -2, -1, false, "none",
-        { mouse = 0, keyboard = 0 },
-        { mouseActivityTick = 0, keyboardActivityTick = 0 })
+        -2, -2, -1, false)
     luaunit.assertFalse(negative.update(0.016))
 end
 
 function TestScreenFlashClock:testStickyHandleKeepsCyclingWhenTheCountIsZero()
     local handle = ScreenFlash.BuildHandle(
         { a = 200 }, "instant", "instant",
-        1, 1, 0, true, "none",
-        { mouse = 0, keyboard = 0 },
-        { mouseActivityTick = 0, keyboardActivityTick = 0 })
+        1, 1, 0, true)
     luaunit.assertTrue(handle.update(1.5))
     luaunit.assertEquals(handle.state.alpha, 0)
     luaunit.assertTrue(handle.update(0.5))
     luaunit.assertEquals(handle.state.alpha, 200)
-end
-
-function TestScreenFlashClock:testHandleStillAutoDismissesFromDismissOn()
-    local function flashed(dismissOn, ticks)
-        return ScreenFlash.BuildHandle(
-            { a = 200 }, "instant", "instant",
-            1, 1, 3, false, dismissOn,
-            { mouse = 1, keyboard = 1 },
-            ticks)
-    end
-    luaunit.assertFalse(flashed("mouse", { mouseActivityTick = 2, keyboardActivityTick = 1 }).update(0.1))
-    luaunit.assertFalse(flashed("keyboard", { mouseActivityTick = 1, keyboardActivityTick = 2 }).update(0.1))
-    luaunit.assertFalse(flashed("both", { mouseActivityTick = 2, keyboardActivityTick = 1 }).update(0.1))
-    luaunit.assertTrue(flashed("none", { mouseActivityTick = 9, keyboardActivityTick = 9 }).update(0.1))
 end
 
 TestScreenFlashPins = {}
@@ -246,7 +216,7 @@ function TestScreenFlashPins:testPinOrderDefaultsAndWireableDurations()
     })
     local pins = reg.types["action.screen_flash"].pins
     local expected = {
-        "show", "dismiss", "color", "inShape", "rise", "outShape", "fall", "cycles", "sticky", "dismissOn",
+        "show", "dismiss", "color", "inShape", "rise", "outShape", "fall", "cycles", "sticky",
     }
     luaunit.assertEquals(#pins, #expected)
     for i, name in ipairs(expected) do
@@ -278,8 +248,7 @@ function TestScreenFlashPins:testPinOrderDefaultsAndWireableDurations()
 
     luaunit.assertEquals(byName.inShape.dataType, "shape")
     luaunit.assertEquals(byName.outShape.dataType, "shape")
-    luaunit.assertEquals(byName.dismissOn.dataType, "dismissOn")
-    luaunit.assertEquals(byName.dismissOn.default, "both")
+    luaunit.assertNil(byName.dismissOn)
     luaunit.assertNil(byName.hold)
 end
 
@@ -320,7 +289,6 @@ function TestScreenFlashRun:testWiredRiseDrivesTheLiveFlash()
         fall = 2,
         cycles = 1,
         sticky = false,
-        dismissOn = "none",
     })
     luaunit.assertTrue(state.handle.update(2))
     luaunit.assertEquals(state.handle.state.alpha, 100)
@@ -336,7 +304,6 @@ function TestScreenFlashRun:testWiredZeroCyclesEndsBeforeADraw()
         fall = 1,
         cycles = 0,
         sticky = false,
-        dismissOn = "none",
     })
     luaunit.assertFalse(state.handle.update(0.016))
 end
@@ -351,7 +318,6 @@ function TestScreenFlashRun:testWiredStickyIgnoresAZeroCycleCount()
         fall = 1,
         cycles = 0,
         sticky = true,
-        dismissOn = "none",
     })
     luaunit.assertTrue(state.handle.update(2.5))
     luaunit.assertEquals(state.handle.state.alpha, 200)
@@ -363,7 +329,6 @@ function TestScreenFlashRun:testMissingDurationsPlayThreeOneSecondPairs()
         color = { a = 200 },
         inShape = "fade",
         outShape = "instant",
-        dismissOn = "none",
     })
     luaunit.assertTrue(state.handle.update(0.5))
     luaunit.assertEquals(state.handle.state.alpha, 100)
@@ -375,7 +340,7 @@ function TestScreenFlashRun:testDismissClearsThatNodesFlash()
     local effects, _, run = registeredRun()
     local state = show(run, {
         color = { a = 200 },
-        rise = 1, fall = 1, cycles = 3, sticky = false, dismissOn = "none",
+        rise = 1, fall = 1, cycles = 3, sticky = false,
     })
     luaunit.assertEquals(effects:StackCount(state), 1)
     run({ state = state, exec = "dismiss", In = function() end })
@@ -389,7 +354,7 @@ function TestScreenFlashRun:testShowReplacesThatNodesOwnFlash()
         color = { a = 200 },
         inShape = "instant",
         outShape = "instant",
-        rise = 1, fall = 1, cycles = 3, sticky = true, dismissOn = "none",
+        rise = 1, fall = 1, cycles = 3, sticky = true,
     }
     local state = show(run, values)
     local first = state.handle
@@ -404,7 +369,7 @@ function TestScreenFlashRun:testTwoScreenFlashNodesStayIndependent()
     local effects, _, run = registeredRun()
     local values = {
         color = { a = 200 },
-        rise = 1, fall = 1, cycles = 3, sticky = true, dismissOn = "none",
+        rise = 1, fall = 1, cycles = 3, sticky = true,
     }
     local first = show(run, values)
     local second = show(run, values)
@@ -415,32 +380,6 @@ function TestScreenFlashRun:testTwoScreenFlashNodesStayIndependent()
     luaunit.assertEquals(effects:StackCount(second), 1)
     luaunit.assertTrue(second.handle.update(0.5))
     luaunit.assertEquals(second.handle.state.alpha, 200)
-end
-
-TestScreenFlashAutoDismiss = {}
-
-function TestScreenFlashAutoDismiss:testNoneNeverAutoDismisses()
-    local baseline = { mouse = 1, keyboard = 1 }
-    luaunit.assertFalse(ScreenFlash.ShouldAutoDismiss("none", baseline, { mouse = 99, keyboard = 99 }))
-end
-
-function TestScreenFlashAutoDismiss:testMouseOnlyTriggersOnMouseTickChange()
-    local baseline = { mouse = 1, keyboard = 1 }
-    luaunit.assertTrue(ScreenFlash.ShouldAutoDismiss("mouse", baseline, { mouse = 2, keyboard = 1 }))
-    luaunit.assertFalse(ScreenFlash.ShouldAutoDismiss("mouse", baseline, { mouse = 1, keyboard = 2 }))
-end
-
-function TestScreenFlashAutoDismiss:testKeyboardOnlyTriggersOnKeyboardTickChange()
-    local baseline = { mouse = 1, keyboard = 1 }
-    luaunit.assertTrue(ScreenFlash.ShouldAutoDismiss("keyboard", baseline, { mouse = 1, keyboard = 2 }))
-    luaunit.assertFalse(ScreenFlash.ShouldAutoDismiss("keyboard", baseline, { mouse = 2, keyboard = 1 }))
-end
-
-function TestScreenFlashAutoDismiss:testBothTriggersOnEitherTickChange()
-    local baseline = { mouse = 1, keyboard = 1 }
-    luaunit.assertTrue(ScreenFlash.ShouldAutoDismiss("both", baseline, { mouse = 2, keyboard = 1 }))
-    luaunit.assertTrue(ScreenFlash.ShouldAutoDismiss("both", baseline, { mouse = 1, keyboard = 2 }))
-    luaunit.assertFalse(ScreenFlash.ShouldAutoDismiss("both", baseline, { mouse = 1, keyboard = 1 }))
 end
 
 return TestScreenFlashAlphaAt

@@ -1,5 +1,7 @@
 -- Alert Presets on the Pack named Watchdog Starter Pack.
 
+local Theme = require("src/ui/theme")
+
 local StarterAlerts = {}
 
 -- Pack layout is the same { id, x, y } array an Alert save uses.
@@ -123,7 +125,15 @@ local function lowResource(registry, resource, authorId, name, soundId, flashCol
         color = flashColor,
         inShape = "instant",
         outShape = "instant",
-        dismissOn = "both",
+        cycles = 3,
+        sticky = false,
+    })
+    -- Rebuilt, not migrated: all three checks on. An alert already made from
+    -- the old pack is a saved graph and takes the both path instead.
+    local input = graph:AddNode("trigger.player_input", {
+        mouseMove = true,
+        keyboard = true,
+        mouseClick = true,
     })
     connect(graph, name, trigger, "current", compare, "a")
     connect(graph, name, trigger, "max", quarter, "a")
@@ -135,6 +145,7 @@ local function lowResource(registry, resource, authorId, name, soundId, flashCol
     connect(graph, name, branch, "false", once, "reset")
     connect(graph, name, once, "out", sound, "in")
     connect(graph, name, once, "out", flash, "show")
+    connect(graph, name, input, "out", flash, "dismiss")
     return {
         authorId = authorId,
         name = name,
@@ -147,6 +158,7 @@ local function lowResource(registry, resource, authorId, name, soundId, flashCol
             [once] = { x = 326, y = 328 },
             [sound] = { x = 605, y = 143 },
             [flash] = { x = 605, y = 328 },
+            [input] = { x = 605 - Theme.NODE_WIDTH, y = 328 },
             [percent] = { x = 279, y = 156 },
         }),
         variables = { { nodeId = quarter, pinName = "b" } },

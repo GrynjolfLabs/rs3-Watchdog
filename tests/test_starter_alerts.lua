@@ -507,7 +507,8 @@ end
 -- True goes through Do Once (startClosed false) to the sound and Screen Flash.
 -- False resets Do Once and stops there. Life flashes red and plays the
 -- ham-base alarm. Prayer keeps the saved blue flash and the klaxon.
--- dismissOn is both.
+-- The flash is not sticky, Cycles is 3, and a Player Input with all three
+-- checks on is wired to Dismiss.
 function TestStarterAlerts:testLowResourceCopiesAnOrdinaryAlert()
     for _, spec in ipairs(LOW_RESOURCES) do
         local preset = self.packs:GetAlertPreset("Watchdog Starter Pack", spec.authorId)
@@ -557,6 +558,7 @@ function TestStarterAlerts:testLowResourceCopiesAnOrdinaryAlert()
             "std.doonce",
             "std.math",
             "std.math",
+            "trigger.player_input",
             "trigger.resource_changed",
         })
         local resource = onlyNode(live, "trigger.resource_changed")
@@ -565,6 +567,7 @@ function TestStarterAlerts:testLowResourceCopiesAnOrdinaryAlert()
         local once = onlyNode(live, "std.doonce")
         local sound = onlyNode(live, "action.sound")
         local flash = onlyNode(live, "action.screen_flash")
+        local input = onlyNode(live, "trigger.player_input")
 
         luaunit.assertEquals(live:GetControl(resource, "resource"), spec.resource)
         luaunit.assertEquals(live:GetControl(mark.nodeId, "operation"), "*")
@@ -574,7 +577,12 @@ function TestStarterAlerts:testLowResourceCopiesAnOrdinaryAlert()
         luaunit.assertEquals(live:GetControl(compare, "operation"), "<=")
         luaunit.assertEquals(live:GetControl(once, "startClosed"), false)
         luaunit.assertEquals(live:GetControl(sound, "soundId"), spec.soundId)
-        luaunit.assertEquals(live:GetControl(flash, "dismissOn"), "both")
+        luaunit.assertEquals(live:GetControl(flash, "sticky"), false)
+        luaunit.assertEquals(live:GetControl(flash, "cycles"), 3)
+        luaunit.assertNil(live:GetControl(flash, "dismissOn"))
+        luaunit.assertEquals(live:GetControl(input, "mouseMove"), true)
+        luaunit.assertEquals(live:GetControl(input, "keyboard"), true)
+        luaunit.assertEquals(live:GetControl(input, "mouseClick"), true)
         luaunit.assertEquals(live:GetControl(flash, "color"), spec.flash)
         luaunit.assertEquals(live:GetControl(flash, "inShape"), "instant")
         luaunit.assertEquals(live:GetControl(flash, "outShape"), "instant")
@@ -591,11 +599,12 @@ function TestStarterAlerts:testLowResourceCopiesAnOrdinaryAlert()
             string.format("%d.false->%d.reset", branch, once),
             string.format("%d.out->%d.in", once, sound),
             string.format("%d.out->%d.show", once, flash),
+            string.format("%d.out->%d.dismiss", input, flash),
         }
         table.sort(expectedWires)
         luaunit.assertEquals(sortedWires(live), expectedWires)
 
-        luaunit.assertEquals(#entry.layout, 8)
+        luaunit.assertEquals(#entry.layout, 9)
         local seen = {}
         for _, pos in ipairs(entry.layout) do
             luaunit.assertNil(seen[pos.id])
@@ -611,7 +620,8 @@ function TestStarterAlerts:testLowResourceCopiesAnOrdinaryAlert()
         luaunit.assertEquals(layout[once], { x = 326, y = 328 })
         luaunit.assertEquals(layout[sound], { x = 605, y = 143 })
         luaunit.assertEquals(layout[flash], { x = 605, y = 328 })
-        for _, id in ipairs({ resource, mark.nodeId, percentNode.id, compare, branch, once, sound, flash }) do
+        luaunit.assertEquals(layout[input], { x = 355, y = 328 })
+        for _, id in ipairs({ resource, mark.nodeId, percentNode.id, compare, branch, once, sound, flash, input }) do
             luaunit.assertEquals(seen[id], true)
         end
     end
