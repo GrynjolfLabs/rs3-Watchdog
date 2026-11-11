@@ -133,7 +133,14 @@ function Node.BuildGeometry(pins, x, y, width, opts)
         end
     end
 
-    local rows = math.max(#inputs, #outputs)
+    -- Config is not a pin. It occupies body rows under the input pins so a checkbox
+    -- can be toggled without offering a wire socket.
+    local config = {}
+    if not placeholder and opts ~= nil and type(opts.config) == "table" then
+        config = opts.config
+    end
+
+    local rows = math.max(#inputs, #outputs, #inputs + #config)
 
     -- Mode strip (ADR-0011) sits under the header when this instance's type has modes.
     -- Not a pin: `opts.modeLabel` is the current mode's display label, or nil.
@@ -166,7 +173,7 @@ function Node.BuildGeometry(pins, x, y, width, opts)
     local height = rowTop[rows + 1] + extraBodyH + Theme.BODY_PAD_BOTTOM
 
     local geom = { x = x, y = y, w = width, h = height,
-        pins = {}, byName = {}, controls = {}, testButtons = {}, placeholder = placeholder }
+        pins = {}, byName = {}, controls = {}, configLabels = {}, testButtons = {}, placeholder = placeholder }
     if extraBodyH > 0 then
         geom.viewerGrid = {
             x = Theme.PIN_MARGIN_X,
@@ -283,6 +290,52 @@ function Node.BuildGeometry(pins, x, y, width, opts)
                     kind = r.kind, axis = r.axis,
                     enabled = r.enabled,          -- a mode checkbox row's toggle-ability
                     placeholder = r.placeholder,  -- e.g. the matcher needle's / capture's empty-state hint
+                    x = r.x, y = r.y, w = r.w, h = r.h,
+                }
+            end
+        end
+    end
+
+    -- Config rows sit after input pins. No glyph: the label is the check's name,
+    -- and the checkbox is an ordinary control the editor commits by that name.
+    for i, cfg in ipairs(config) do
+        local row = #inputs + i
+        local label = cfg.label or cfg.name or ""
+        local cy = rowTop[row] + Theme.PIN_ROW_HEIGHT * 0.5
+        geom.configLabels[#geom.configLabels + 1] = {
+            label = label,
+            x = Theme.PIN_MARGIN_X,
+            cy = cy,
+        }
+        local pinControl = Controls.PinControlForPin(typeKey, {
+            name = cfg.name,
+            dataType = cfg.dataType or "bool",
+        })
+        if pinControl ~= nil and pinControl.Inline then
+            local left = Theme.PIN_MARGIN_X + labelWidth(label) + Theme.CONTROL_LABEL_GAP
+            local rightInset = Theme.CONTROL_PAD_X
+            local outPin = outputs[row]
+            if outPin ~= nil then
+                local outLabel = outPin.label or outPin.name or ""
+                rightInset = Theme.PIN_GLYPH * 0.5 + Theme.PIN_LABEL_GAP
+                    + labelWidth(outLabel) + Theme.CONTROL_LABEL_GAP
+            end
+            local right = width - Theme.PIN_MARGIN_X - rightInset
+            if outPin == nil and right < left + Theme.CONTROL_MIN_W then
+                right = left + Theme.CONTROL_MIN_W
+            end
+            if right < left then right = left end
+            local rects = pinControl.Layout({
+                x = left, y = cy - Theme.CONTROL_H * 0.5, w = right - left, h = Theme.CONTROL_H,
+            }) or {}
+            for _, r in ipairs(rects) do
+                geom.controls[#geom.controls + 1] = {
+                    pinName = cfg.name,
+                    pinControl = pinControl,
+                    default = cfg.default,
+                    kind = r.kind, axis = r.axis,
+                    enabled = r.enabled,
+                    placeholder = r.placeholder,
                     x = r.x, y = r.y, w = r.w, h = r.h,
                 }
             end
@@ -409,6 +462,16 @@ function Node.Draw(canvas, view, geom, meta, opts)
                 canvas:AddText(pcx - hs - view:Scale(Theme.PIN_LABEL_GAP) - tw, ty,
                     tw, 0, pin.label, textData)
             end
+        end
+    end
+
+    for _, row in ipairs(geom.configLabels or {}) do
+        if labelFont ~= nil then
+            local tx, ty = view:ToScreen(geom.x + row.x, geom.y + row.cy)
+            ty = ty - view:Scale(7)
+            local tw = Theme.TextWidth(12 * view.zoom, row.label) or (#row.label * view:Scale(7))
+            local textData = createTextDataConfig(labelFont, Theme.Vec4(Theme.COL_PIN_LABEL))
+            canvas:AddText(tx, ty, tw, 0, row.label, textData)
         end
     end
 

@@ -44,6 +44,7 @@ local Util = require("src/util")
 ---@field toast any|nil                                    # ToastStack, wired by main.lua
 ---@field keyboardActivityTick integer
 ---@field mouseActivityTick integer
+---@field _cursorMoves { typeKey: string, filter: fun(payload: any, node: Watchdog.NodeHandle): boolean }[]
 ---@field new fun(eventSource: any|nil, mouseSource: any|nil, identitySource: Watchdog.IdentitySource|nil): Watchdog.Runtime
 ---@field SetBucketLoader fun(self: Watchdog.Runtime, loader: fun(trackingId: string): Watchdog.RestoredAlert[])
 ---@field GetActiveCharacter fun(self: Watchdog.Runtime): string|nil, string|nil
@@ -64,6 +65,7 @@ local Util = require("src/util")
 ---@field SetEnabled fun(self: Watchdog.Runtime, name: string, enabled: boolean): boolean
 ---@field Toggle fun(self: Watchdog.Runtime, name: string): integer|nil
 ---@field BindTrigger fun(self: Watchdog.Runtime, typeKey: string, entries: Watchdog.TriggerBinding[])
+---@field BindCursorMove fun(self: Watchdog.Runtime, typeKey: string, filter: fun(payload: any, node: Watchdog.NodeHandle): boolean)
 ---@field Stop fun(self: Watchdog.Runtime)
 local Runtime = {}
 Runtime.__index = Runtime
@@ -126,6 +128,8 @@ function Runtime.new(eventSource, mouseSource, identitySource)
         _pendingResolve = false,
         _bucketLoader = nil,
         channels = {},
+        -- Player Input mouse-move bindings. Fired from the cursor poll, not an event channel.
+        _cursorMoves = {},
         -- Poll Enter/Leave edge state, keyed by graph then nodeId (ids unique only within a graph).
         -- Weak keys; missing ⇒ false (already-true-at-load fires Enter); never serialized.
         pollEdgeState = setmetatable({}, { __mode = "k" }),
@@ -355,6 +359,7 @@ function Runtime:_pollMouseActivity()
     -- must not itself count as "activity" (a plugin load/reload isn't a mouse movement).
     if last ~= nil and (ix ~= last.x or iy ~= last.y) then
         self.mouseActivityTick = self.mouseActivityTick + 1
+        self:_fireCursorMoves()
     end
     self._lastMousePos = { x = ix, y = iy }
 end
@@ -637,6 +642,21 @@ function Runtime:Toggle(name)
         end
     end
     return #matches
+end
+
+-- Mouse move uses the cursor poll, which is not an event channel. The first
+-- successful poll only stores a position; a later change fires these bindings.
+---@param typeKey string
+---@param filter fun(payload: any, node: Watchdog.NodeHandle): boolean
+function Runtime:BindCursorMove(typeKey, filter)
+    assert(type(typeKey) == "string" and typeKey ~= "", "BindCursorMove requires a typeKey")
+    self._cursorMoves[#self._cursorMoves + 1] = { typeKey = typeKey, filter = filter }
+end
+
+function Runtime:_fireCursorMoves()
+    for _, binding in ipairs(self._cursorMoves) do
+        self:_fireBinding(binding, nil)
+    end
 end
 
 -- Subscribe each `event` once. Poll: nil transform sample freezes edge state for that tick.
