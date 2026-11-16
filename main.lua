@@ -821,6 +821,10 @@ Event.KeyDown.Subscribe(Events.KeyDown, function(keyEvent)
 end)
 
 -- The shell key and the content-layer Toggle share api.Toggle.
+HubLayers.SetResetPositions(function()
+    runtime.infobox:ResetAnchor()
+    runtime.toast:ResetAnchor()
+end)
 HubLayers.LoadPrefs()
 HubLayers.Bind(function()
     api.Toggle()

@@ -55,6 +55,15 @@ function Toast:GetAnchorOffset()
     return { dx = self.anchor.dx, dy = self.anchor.dy }
 end
 
+-- Clear the gesture first so Update and the release cannot save the drag.
+function Toast:ResetAnchor()
+    self._pressed = false
+    self.drag = nil
+    self.anchor = { dx = 0, dy = 0 }
+    self:_saveAnchor()
+    self:Update()
+end
+
 --- Drag ---------------------------------------------------------------------------------
 
 function Toast:BeginDrag(mousePos)

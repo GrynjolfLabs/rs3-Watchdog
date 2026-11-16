@@ -6,6 +6,7 @@
 
 local luaunit = require("luaunit")
 local EffectRegistry = require("src/effects")
+local Theme = require("src/ui/theme")
 local Toast = require("src/toast")
 local ToastNode = require("src/nodes/actions/toast")
 local Registry = require("registry")
@@ -226,6 +227,28 @@ function TestToast:tearDown()
     if self._restoreMouse then
         Mouse = self._savedMouse
     end
+end
+
+function TestToast:testResetAnchorClearsTheOffsetAndIgnoresTheOpenDrag()
+    local persistence = newFakePersistence()
+    local toast = Toast.new(self.effects, persistence)
+    toast:Show("nodeA", { text = "hi" })
+    toast.capture = fakeCapture()
+    toast:BeginDrag({ x = 0, y = 0 })
+    toast:DragTo({ x = 10, y = 20 })
+    toast._pressed = true
+    self._savedMouse = Mouse
+    self._restoreMouse = true
+    Mouse = { GetPosition = function() return { x = 80, y = 40 } end }
+    toast:ResetAnchor()
+    luaunit.assertEquals(toast:GetAnchorOffset(), { dx = 0, dy = 0 })
+    luaunit.assertEquals(persistence.saved, { dx = 0, dy = 0 })
+    luaunit.assertEquals(persistence.saves, 1)
+    luaunit.assertEquals(toast.capture.x, 1920 * 0.5 - Theme.TOAST_W * 0.5)
+    luaunit.assertEquals(toast.capture.y, Theme.TOAST_TOP_MARGIN)
+    toast:Update()
+    luaunit.assertEquals(toast:GetAnchorOffset(), { dx = 0, dy = 0 })
+    luaunit.assertEquals(persistence.saves, 1)
 end
 
 function TestToast:testEndDragPersistsFinalPosition()

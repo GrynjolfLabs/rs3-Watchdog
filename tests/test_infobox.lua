@@ -307,6 +307,26 @@ function TestDrag:testDragIgnoredWithoutBeginDrag()
     luaunit.assertEquals(ay, 100)
 end
 
+function TestDrag:testResetAnchorDropsTheDragAndPersistsTheDefault()
+    local saved = {}
+    self.area:SetPersistence({ SaveAnchor = function(x, y) saved.x, saved.y = x, y end })
+    self.area:BeginDrag(105, 105)
+    self.area:Drag(155, 205)
+    self.area._capture = fakeCapture()
+    self.area:_expandCapture()
+    self.area:ResetAnchor()
+    local ax, ay = self.area:GetAnchor()
+    luaunit.assertEquals(ax, Theme.INFOBOX_DEFAULT_X)
+    luaunit.assertEquals(ay, Theme.INFOBOX_DEFAULT_Y)
+    luaunit.assertEquals(saved.x, 8)
+    luaunit.assertEquals(saved.y, 8)
+    luaunit.assertFalse(self.area:IsDragging())
+    luaunit.assertEquals(self.area._capture.x, 8)
+    luaunit.assertEquals(self.area._capture.y, 8)
+    luaunit.assertEquals(self.area._capture.w, Theme.INFOBOX_BOX_SIZE)
+    luaunit.assertEquals(self.area._capture.h, Theme.INFOBOX_BOX_SIZE)
+end
+
 function TestDrag:testEndDragPersistsAnchorThroughHook()
     local saved = {}
     self.area:SetPersistence({ SaveAnchor = function(x, y) saved.x, saved.y = x, y end })

@@ -90,6 +90,16 @@ function InfoBox:SetAnchor(x, y)
     self.anchor = { x = x, y = y }
 end
 
+-- Clear the gesture first so the logic tick and the release cannot save the drag.
+function InfoBox:ResetAnchor()
+    self._drag = nil
+    self.anchor = { x = Theme.INFOBOX_DEFAULT_X, y = Theme.INFOBOX_DEFAULT_Y }
+    if self._persistence ~= nil and self._persistence.SaveAnchor ~= nil then
+        pcall(self._persistence.SaveAnchor, self.anchor.x, self.anchor.y)
+    end
+    self:Reposition()
+end
+
 function InfoBox:SetWrapWidth(w)
     self.wrapWidth = w
 end

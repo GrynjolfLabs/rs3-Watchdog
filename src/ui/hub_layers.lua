@@ -3,8 +3,9 @@
 -- lock, what a restricted area changes, and whether chat and tracking
 -- permission are granted. Rows stack in that flow, so removing one reflows
 -- the rest. No per-alert settings.
--- ContentLayerReady registers Toggle, which opens the manager, and Reset All
--- Popups, which clears one-shot notices. While RestrictedAreas reports
+-- ContentLayerReady registers Toggle, which opens the manager, Reset All
+-- Popups, which clears one-shot notices, and Reset Positions, which puts the
+-- infobox and toasts back at their defaults. While RestrictedAreas reports
 -- Restricted, a line under the buttons reads "In Restricted Area" in red,
 -- with a description under it. Otherwise the panel is only the buttons.
 
@@ -47,6 +48,8 @@ local positionsLocked = false
 local prefsLoaded = false
 local contentToggleButton = nil
 local contentResetButton = nil
+local contentPositionsButton = nil
+local resetPositions = nil
 local shellOpen = false
 -- The click flips isToggled itself. Writing it again from that click lands on
 -- the wrong side of the client's flip.
@@ -136,6 +139,11 @@ function HubLayers.SetPositionsLocked(locked)
     HubLayers.LoadPrefs()
     positionsLocked = locked == true
     writeString(LOCK_DB, positionsLocked and "1" or "0")
+end
+
+---@param fn fun()|nil
+function HubLayers.SetResetPositions(fn)
+    resetPositions = fn
 end
 
 local function releaseSettingsWidgets()
@@ -322,6 +330,9 @@ local function fillContent(parent, onToggle)
     if contentResetButton ~= nil and contentParent == parent then
         destroyOwned(contentResetButton)
     end
+    if contentPositionsButton ~= nil and contentParent == parent then
+        destroyOwned(contentPositionsButton)
+    end
     if contentLine ~= nil and contentParent == parent then
         destroyOwned(contentLine)
     end
@@ -330,6 +341,7 @@ local function fillContent(parent, onToggle)
     end
     contentToggleButton = nil
     contentResetButton = nil
+    contentPositionsButton = nil
     contentLine = nil
     contentDetail = nil
     contentParent = parent
@@ -338,14 +350,27 @@ local function fillContent(parent, onToggle)
     local function onResetPopups()
         Notices.shared:ResetAllPopups()
     end
+    local function onResetPositions()
+        if resetPositions ~= nil then
+            resetPositions()
+        end
+    end
     local buttonY = INSET_X
-    local function makeButton(label, onPress)
+    local function addButton(label, onPress, x, y, width, widthAnchor, xAnchor)
         local button = ui.Button.new(parent)
-        button:SetPos(INSET_X, buttonY)
-        button:SetSize(-INSET_X * 2, BUTTON_H, 1)
+        if xAnchor ~= nil then
+            button:SetPos(x, y, xAnchor)
+        else
+            button:SetPos(x, y)
+        end
+        button:SetSize(width, BUTTON_H, widthAnchor)
         button.stylesheetID = id.StyleSheet.BUTTON_DEFAULT
         button.label = label
         button:Subscribe(ui.Hook.ONBUTTONPRESSED, onPress)
+        return button
+    end
+    local function makeButton(label, onPress)
+        local button = addButton(label, onPress, INSET_X, buttonY, -INSET_X * 2, 1)
         buttonY = buttonY + BUTTON_H + 4
         return button
     end
@@ -353,7 +378,15 @@ local function fillContent(parent, onToggle)
     button.canToggle = true
     contentToggleButton = button
     applyShellOpen()
-    contentResetButton = makeButton("Reset All Popups", onResetPopups)
+
+    -- One row. Each button is half the panel, split by the same 4px row gap.
+    local rowY = buttonY
+    local halfGap = 2
+    contentResetButton = addButton(
+        "Reset All Popups", onResetPopups, INSET_X, rowY, -INSET_X - halfGap, 0.5)
+    contentPositionsButton = addButton(
+        "Reset Positions", onResetPositions, halfGap, rowY, -INSET_X - halfGap, 0.5, 0.5)
+    buttonY = rowY + BUTTON_H + 4
     contentButtonY = buttonY
 
     -- IsRestricted() first: Subscribe does not replay the current answer.
@@ -403,6 +436,8 @@ function HubLayers.Unbind()
     settingsParent = nil
     contentToggleButton = nil
     contentResetButton = nil
+    contentPositionsButton = nil
+    resetPositions = nil
     contentLine = nil
     contentDetail = nil
     shellOpen = false
@@ -416,6 +451,7 @@ function HubLayers.Stop()
     destroyOwned(settingsRoot)
     destroyOwned(contentToggleButton)
     destroyOwned(contentResetButton)
+    destroyOwned(contentPositionsButton)
     destroyOwned(contentLine)
     destroyOwned(contentDetail)
     HubLayers.Unbind()

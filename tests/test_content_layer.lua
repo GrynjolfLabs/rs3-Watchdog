@@ -39,13 +39,15 @@ function TestContentLayer:setUp()
     local test = self
     local function component(kind, parent)
         local node = { kind = kind, parent = parent, hooks = {}, destroyed = false, children = {} }
-        function node:SetPos(x, y)
+        function node:SetPos(x, y, xAnchor)
             self.x = x
             self.y = y
+            self.xAnchor = xAnchor
         end
-        function node:SetSize(w, h)
+        function node:SetSize(w, h, widthAnchor)
             self.w = w
             self.h = h
+            self.widthAnchor = widthAnchor
         end
         function node:Subscribe(hook, fn)
             self.hooks[hook] = fn
@@ -176,8 +178,9 @@ function TestContentLayer:testFillWhileRestrictedShowsRestrictedUnderToggle()
     self:installAreas(true)
     self:showContent()
     local buttons = live(self.parent, "button")
-    luaunit.assertEquals(#buttons, 2)
+    luaunit.assertEquals(#buttons, 3)
     luaunit.assertEquals(buttons[2].label, "Reset All Popups")
+    luaunit.assertEquals(buttons[3].label, "Reset Positions")
     local button = self:button()
     luaunit.assertEquals(button.label, "Toggle")
     button.hooks["ONBUTTONPRESSED"]()
@@ -229,17 +232,49 @@ end
 function TestContentLayer:testRefillReplacesTheResetButton()
     self:showContent()
     local first = self:resetButton()
+    local firstPositions = self:positionsButton()
     self:showContent()
     luaunit.assertTrue(first.destroyed)
-    luaunit.assertEquals(#live(self.parent, "button"), 2)
+    luaunit.assertTrue(firstPositions.destroyed)
+    luaunit.assertEquals(#live(self.parent, "button"), 3)
     luaunit.assertFalse(self:resetButton().destroyed)
+    luaunit.assertFalse(self:positionsButton().destroyed)
 end
 
 function TestContentLayer:testStopDestroysTheResetButton()
     self:showContent()
     local reset = self:resetButton()
+    local positions = self:positionsButton()
     HubLayers.Stop()
     luaunit.assertTrue(reset.destroyed)
+    luaunit.assertTrue(positions.destroyed)
+end
+
+function TestContentLayer:positionsButton()
+    for _, button in ipairs(live(self.parent, "button")) do
+        if button.label == "Reset Positions" then return button end
+    end
+    error("Reset Positions button missing")
+end
+
+function TestContentLayer:testResetPositionsSitsBesidePopupsAndFires()
+    local calls = 0
+    HubLayers.SetResetPositions(function()
+        calls = calls + 1
+    end)
+    self:showContent()
+    local popups = self:resetButton()
+    local positions = self:positionsButton()
+    luaunit.assertEquals(positions.y, popups.y)
+    luaunit.assertEquals(popups.x, 12)
+    luaunit.assertNil(popups.xAnchor)
+    luaunit.assertEquals(popups.widthAnchor, 0.5)
+    luaunit.assertEquals(positions.x, 2)
+    luaunit.assertEquals(positions.xAnchor, 0.5)
+    luaunit.assertEquals(positions.widthAnchor, 0.5)
+    luaunit.assertEquals(positions.w, popups.w)
+    positions.hooks["ONBUTTONPRESSED"]()
+    luaunit.assertEquals(calls, 1)
 end
 
 function TestContentLayer:testFillWhileNotRestrictedShowsNoRestrictedCopy()
