@@ -57,7 +57,7 @@ Target: mirror the trigger/notification list from https://github.com/adamk33n3r/
 ### Actions
 
 - [x] Sound Effect — `action.sound`
-  - `audio.Play(builtinResourceID, params?)` with a builtin sound id. `bus` is the shared `audioBus` dropdown (Master, SFX, Music, Ambient, Voiceover; default SFX), same list as Custom Sound. Done.
+  - `audio.Play(builtinResourceID, params?)` with a builtin sound id. `bus` is the shared `audioBus` dropdown (Master, SFX, Music, Ambient, Voiceover; default SFX), same list as Custom Sound. `volume` (0-100, default 100) and `loops` (default 0) match Custom Sound and scale the same way at play time. Done.
 - [x] Custom Sound — `action.custom_sound` (#33)
   - `audio.Play(resource, params?)` where `resource` = `Plugin.resources[name]`, picked via an interim dropdown Control (enumerated from `Plugin.resources` at Register time — a disk file-picker is API-blocked/out of scope). `volume` (1.0)/`loops` (0) pins. `bus` is the shared `audioBus` dropdown (Master, SFX, Music, Ambient, Voiceover; default SFX), resolved to `audio.AudioBus` at play time. Resources are never Unloaded, preload-on-reference via a new generalized `preload(node)` node-type hook (`runtime.lua`'s `PreloadNode`/`PreloadGraph`), called on graph-restore (`Runtime:AddAlert`) and control-commit (`ui/graph.lua`'s new `Editor:setControl`, the one path every Control edit now commits through) — plus an on-demand backstop in `run` itself. BUILD-VERIFY: `Plugin.resources` enumerable via `pairs`, `PluginResource:Load()`, `audio.SoundPlaybackParams` fields.
 - [ ] Text to Speech

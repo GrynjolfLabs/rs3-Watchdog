@@ -13,18 +13,31 @@ function Sound.Register(registry)
         category = "action",
         displayName = "Sound Effect",
         pins = {
-            { name = "in", kind = "exec", direction = "in" },
+            { name = "in",     kind = "exec", direction = "in" },
             AudioBus.Pin(),
-            { name = "soundId", kind = "data", direction = "in", dataType = "number",
-              default = DEFAULT_SOUND_ID },
+            {
+                name = "soundId",
+                kind = "data",
+                direction = "in",
+                dataType = "number",
+                default = DEFAULT_SOUND_ID
+            },
+            { name = "volume", kind = "data", direction = "in", dataType = "number", default = 100 },
+            { name = "loops",  kind = "data", direction = "in", dataType = "number", default = 0 },
         },
         run = function(ctx)
             -- The registry resolves a raw id or a pack record to the stored
             -- builtin sound id. A pack sound effect has no private hold.
             local soundId = Packs:ResolveSoundEffect(ctx:In("soundId"))
             if soundId ~= nil then
+                local volume = ctx:In("volume")
+                if type(volume) ~= "number" then volume = 100 end
+                local loops = ctx:In("loops")
+                if type(loops) ~= "number" then loops = 0 end
                 ---@type SoundPlaybackParams
                 local params = audio.SoundPlaybackParams.new()
+                params.volume = volume / 100
+                params.numLoops = loops
                 params.audioBus = AudioBus.Resolve(ctx:In("bus"))
                 audio.Play(soundId, params)
             end

@@ -38,6 +38,10 @@ function TestSoundRegistration:testRegistersActionSoundWithExecInAndSoundIdPin()
     luaunit.assertEquals(byName.bus.dataType, "audioBus")
     luaunit.assertEquals(byName.bus.default, "SFX")
     luaunit.assertEquals(byName.bus.label, "Bus")
+    luaunit.assertEquals(byName.volume.dataType, "number")
+    luaunit.assertEquals(byName.volume.default, 100)
+    luaunit.assertEquals(byName.loops.dataType, "number")
+    luaunit.assertEquals(byName.loops.default, 0)
 end
 
 TestSoundRun = {}
@@ -63,6 +67,21 @@ function TestSoundRun:testMissingBusPlaysOnSfx()
     luaunit.assertEquals(#self.calls, 1)
     luaunit.assertEquals(self.calls[1].id, 1234)
     luaunit.assertEquals(self.calls[1].params.audioBus, "sfx")
+    luaunit.assertEquals(self.calls[1].params.volume, 1.0)
+    luaunit.assertEquals(self.calls[1].params.numLoops, 0)
+end
+
+function TestSoundRun:testHonorsVolumeAndLoopsPins()
+    -- volume is a 0-100 pin, scaled to the client's 0-1 float (50 -> 0.5).
+    self.desc.run(makeCtx({ soundId = 1234, volume = 50, loops = 3 }))
+    luaunit.assertEquals(self.calls[1].params.volume, 0.5)
+    luaunit.assertEquals(self.calls[1].params.numLoops, 3)
+end
+
+function TestSoundRun:testNonNumberVolumeAndLoopsUseTheDefaults()
+    self.desc.run(makeCtx({ soundId = 1234, volume = "loud", loops = "forever" }))
+    luaunit.assertEquals(self.calls[1].params.volume, 1.0)
+    luaunit.assertEquals(self.calls[1].params.numLoops, 0)
 end
 
 function TestSoundRun:testHonorsBusPin()
@@ -79,10 +98,14 @@ end
 function TestSoundRun:testPackRecordPlaysItsStoredBuiltinSoundIdOnTheSfxBus()
     self.desc.run(makeCtx({
         soundId = { pack = "VoicePack", authorId = "greet_01", soundId = 12345 },
+        volume = 50,
+        loops = 3,
     }))
     luaunit.assertEquals(#self.calls, 1)
     luaunit.assertEquals(self.calls[1].id, 12345)
     luaunit.assertEquals(self.calls[1].params.audioBus, "sfx")
+    luaunit.assertEquals(self.calls[1].params.volume, 0.5)
+    luaunit.assertEquals(self.calls[1].params.numLoops, 3)
 end
 
 function TestSoundRun:testATableThatIsNotAPackRecordIsSilent()
