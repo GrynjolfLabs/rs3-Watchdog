@@ -83,6 +83,7 @@ local luaunit = require("luaunit")
 local Dialog = require("src/ui/dialog")
 local ImportExport = require("src/ui/import_export")
 local Export = require("src/export")
+local ChatPermission = require("src/nodes/chat_permission")
 
 local function button(win, label)
     for _, btn in ipairs(win.buttons) do
@@ -93,9 +94,21 @@ end
 
 TestImportExport = {}
 
+local function setChatPermission(granted)
+    _G.PluginPermissions = { chatAccess = "chatAccess" }
+    _G.Plugin = {
+        HasPermission = function(permission)
+            return granted == true and permission == "chatAccess"
+        end,
+    }
+    ChatPermission.Refresh()
+end
+
 function TestImportExport:setUp()
     self._savedUi = _G.ui
     self._savedPretty = _G.prettyui
+    self._savedPlugin = _G.Plugin
+    self._savedPermissions = _G.PluginPermissions
     installHost()
     self.parent = { id = "ie" }
     Dialog.dismissAll(self.parent)
@@ -105,6 +118,9 @@ function TestImportExport:tearDown()
     Dialog.dismissAll(self.parent)
     _G.ui = self._savedUi
     _G.prettyui = self._savedPretty
+    _G.Plugin = self._savedPlugin
+    _G.PluginPermissions = self._savedPermissions
+    ChatPermission.Refresh()
     PersistentDB = nil
 end
 
@@ -148,6 +164,76 @@ function TestImportExport:testImportFailureStacksErrorAndKeepsPaste()
     button(err, "Close").action()
     luaunit.assertEquals(Dialog.depth(self.parent), 1)
     luaunit.assertFalse(win.destroyed)
+end
+
+function TestImportExport:testSuccessfulImportOfAChatNodeWarnsWhenChatPermissionIsOff()
+    setChatPermission(false)
+    local win = ImportExport.mountImport(self.parent, {
+        onImport = function()
+            return true, { hasChatNode = true, message = "Imported 1 entry." }
+        end,
+    })
+    button(win, "Import").action()
+    luaunit.assertTrue(win.destroyed)
+    luaunit.assertEquals(Dialog.depth(self.parent), 1)
+    local notice = windows[2]
+    luaunit.assertEquals(notice.title, "Chat permission")
+    luaunit.assertEquals(notice.texts[1], "This import includes a Game Message or Player Chat node.")
+    luaunit.assertEquals(notice.texts[2], "Only those nodes wait on chat permission.")
+    luaunit.assertEquals(notice.texts[3], "They do nothing until you grant it, and granting it later is enough.")
+    local understand = button(notice, "I understand")
+    luaunit.assertEquals(understand.opts.variant, "positive")
+    understand.action()
+    luaunit.assertEquals(Dialog.depth(self.parent), 0)
+end
+
+function TestImportExport:testChatPermissionNoticeClosesFromTheTitleBar()
+    setChatPermission(false)
+    local win = ImportExport.mountImport(self.parent, {
+        onImport = function()
+            return true, { hasChatNode = true }
+        end,
+    })
+    button(win, "Import").action()
+    local notice = windows[2]
+    notice:Close()
+    luaunit.assertEquals(Dialog.depth(self.parent), 0)
+end
+
+function TestImportExport:testGrantedChatPermissionSkipsTheNotice()
+    setChatPermission(true)
+    local win = ImportExport.mountImport(self.parent, {
+        onImport = function()
+            return true, { hasChatNode = true, message = "Imported 1 entry." }
+        end,
+    })
+    button(win, "Import").action()
+    luaunit.assertEquals(Dialog.depth(self.parent), 0)
+    luaunit.assertEquals(#windows, 1)
+end
+
+function TestImportExport:testImportWithoutAChatNodeSkipsTheNotice()
+    setChatPermission(false)
+    local win = ImportExport.mountImport(self.parent, {
+        onImport = function()
+            return true, { hasChatNode = false, message = "Imported 1 entry." }
+        end,
+    })
+    button(win, "Import").action()
+    luaunit.assertEquals(Dialog.depth(self.parent), 0)
+    luaunit.assertEquals(#windows, 1)
+end
+
+function TestImportExport:testFailedImportDoesNotWarnAboutChatPermission()
+    setChatPermission(false)
+    local win = ImportExport.mountImport(self.parent, {
+        onImport = function()
+            return false, "not a Watchdog export envelope"
+        end,
+    })
+    button(win, "Import").action()
+    luaunit.assertEquals(windows[2].title, "Could not import alerts")
+    luaunit.assertEquals(#windows, 2)
 end
 
 function TestImportExport:testPasteFieldMaxLengthMatchesExportCap()

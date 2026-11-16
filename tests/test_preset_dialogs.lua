@@ -20,6 +20,7 @@ local Presets = require("src/presets")
 local PresetLabels = require("src/ui/preset_labels")
 local Dialog = require("src/ui/dialog")
 local PresetDialogs = require("src/ui/preset_dialogs")
+local ChatPermission = require("src/nodes/chat_permission")
 local Registry = require("registry")
 require("src/nodes/actions/sound")
 
@@ -364,6 +365,8 @@ function TestNewAlertDialog:setUp()
         prettyui = _G.prettyui,
         Vector4 = _G.Vector4,
         PersistentDB = _G.PersistentDB,
+        Plugin = _G.Plugin,
+        PluginPermissions = _G.PluginPermissions,
     }
     self.packs = Packs.new()
     Packs.install(self.packs)
@@ -427,11 +430,13 @@ function TestNewAlertDialog:setUp()
                     onClose = options.onClose,
                     buttons = {},
                     fields = {},
+                    texts = {},
                 }
                 function win:SetScrollable() end
                 function win:Show() end
                 function win:MoveToFront() end
                 function win:AddText(text)
+                    self.texts[#self.texts + 1] = text
                     local widget = { content = text }
                     function widget:Destroy() self.destroyed = true end
                     return widget
@@ -443,8 +448,8 @@ function TestNewAlertDialog:setUp()
                     self.fields[#self.fields + 1] = field
                     return field
                 end
-                function win:AddFancyButton(label, action)
-                    local button = { label = label, action = action }
+                function win:AddFancyButton(label, action, opts)
+                    local button = { label = label, action = action, opts = opts or {} }
                     function button:SetDisabled(disabled) self.disabled = disabled == true end
                     self.buttons[#self.buttons + 1] = button
                     return button
@@ -473,6 +478,19 @@ function TestNewAlertDialog:tearDown()
     _G.prettyui = self.saved.prettyui
     _G.Vector4 = self.saved.Vector4
     _G.PersistentDB = self.saved.PersistentDB
+    _G.Plugin = self.saved.Plugin
+    _G.PluginPermissions = self.saved.PluginPermissions
+    ChatPermission.Refresh()
+end
+
+local function setChatPermission(granted)
+    _G.PluginPermissions = { chatAccess = "chatAccess" }
+    _G.Plugin = {
+        HasPermission = function(permission)
+            return granted == true and permission == "chatAccess"
+        end,
+    }
+    ChatPermission.Refresh()
 end
 
 function TestNewAlertDialog:button(win, label)
@@ -559,6 +577,151 @@ function TestNewAlertDialog:testVariablePresetDoesNotCreateUntilAnswersExist()
     self:row("Callout").action()
     luaunit.assertEquals(calls, 0)
     luaunit.assertEquals(self.windows[2].title, "Callout")
+end
+
+function TestNewAlertDialog:testPresetWithAGameMessageNodeWarnsWhenChatPermissionIsOff()
+    setChatPermission(false)
+    self.registry:RegisterNodeType("trigger.game_message", {
+        category = "trigger",
+        pins = { { name = "out", kind = "exec", direction = "out" } },
+        run = function() end,
+    })
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("trigger.game_message")
+    local preset, err = Presets.Add("Drops", graph, {})
+    luaunit.assertNotNil(preset, err)
+    local created = 0
+    PresetDialogs.mountNewAlert(self.parent, {
+        registry = self.registry,
+        onFromPreset = function()
+            created = created + 1
+            return { kind = "open", scopeKey = "global", alertId = 9 }, 9, nil
+        end,
+    })
+    self:row("Drops").action()
+    luaunit.assertEquals(created, 1)
+    local notice = self.windows[#self.windows]
+    luaunit.assertEquals(notice.title, "Chat permission")
+    luaunit.assertEquals(notice.texts[1], "This alert includes a Game Message or Player Chat node.")
+    luaunit.assertEquals(notice.texts[2], "Only those nodes wait on chat permission.")
+    luaunit.assertEquals(notice.texts[3], "They do nothing until you grant it, and granting it later is enough.")
+    local understand = self:button(notice, "I understand")
+    luaunit.assertEquals(understand.opts.variant, "positive")
+    understand.action()
+    luaunit.assertEquals(notice.destroyed, true)
+end
+
+function TestNewAlertDialog:testPresetWithoutAChatNodeDoesNotWarn()
+    setChatPermission(false)
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.hold", { hold = 1 })
+    local preset, err = Presets.Add("Quiet", graph, {})
+    luaunit.assertNotNil(preset, err)
+    PresetDialogs.mountNewAlert(self.parent, {
+        onFromPreset = function()
+            return { kind = "open", scopeKey = "global", alertId = 3 }, 3, nil
+        end,
+    })
+    self:row("Quiet").action()
+    luaunit.assertEquals(#self.windows, 1)
+end
+
+function TestNewAlertDialog:testGrantedChatPermissionSkipsThePresetNotice()
+    setChatPermission(true)
+    self.registry:RegisterNodeType("trigger.player_chat", {
+        category = "trigger",
+        pins = { { name = "out", kind = "exec", direction = "out" } },
+        run = function() end,
+    })
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("trigger.player_chat")
+    local preset, err = Presets.Add("Talk", graph, {})
+    luaunit.assertNotNil(preset, err)
+    PresetDialogs.mountNewAlert(self.parent, {
+        onFromPreset = function()
+            return { kind = "open", scopeKey = "global", alertId = 3 }, 3, nil
+        end,
+    })
+    self:row("Talk").action()
+    luaunit.assertEquals(#self.windows, 1)
+end
+
+function TestNewAlertDialog:testFailedPresetCreateDoesNotWarn()
+    setChatPermission(false)
+    self.registry:RegisterNodeType("action.game_message", {
+        category = "action",
+        pins = { { name = "in", kind = "exec", direction = "in" } },
+        run = function() end,
+    })
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("action.game_message")
+    local preset, err = Presets.Add("Say", graph, {})
+    luaunit.assertNotNil(preset, err)
+    PresetDialogs.mountNewAlert(self.parent, {
+        onFromPreset = function()
+            return { kind = "leave" }, nil, "Could not create the alert."
+        end,
+    })
+    self:row("Say").action()
+    luaunit.assertEquals(#self.windows, 1)
+end
+
+function TestNewAlertDialog:testAlertPresetWithAChatNodeWarnsWhenChatPermissionIsOff()
+    setChatPermission(false)
+    self.packs:RegisterDataPack("Starter", {
+        alertPresets = {
+            {
+                authorId = "drops",
+                name = "Drop call",
+                graph = {
+                    version = 1,
+                    nodes = { { id = 1, type = "trigger.game_message", controls = {} } },
+                    connections = {},
+                },
+            },
+        },
+    })
+    local created = 0
+    PresetDialogs.mountNewAlert(self.parent, {
+        onFromAlertPreset = function()
+            created = created + 1
+            return { kind = "open", scopeKey = "global", alertId = 4 }, 4, nil
+        end,
+    })
+    self:row("Drop call").action()
+    luaunit.assertEquals(created, 1)
+    luaunit.assertEquals(self.windows[#self.windows].title, "Chat permission")
+    luaunit.assertEquals(self.windows[#self.windows].texts[1], "This alert includes a Game Message or Player Chat node.")
+end
+
+function TestNewAlertDialog:testVariablePresetWarnsOnlyAfterTheAlertIsCreated()
+    setChatPermission(false)
+    self.registry:RegisterNodeType("trigger.game_message", {
+        category = "trigger",
+        pins = { { name = "out", kind = "exec", direction = "out" } },
+        run = function() end,
+    })
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("trigger.game_message")
+    local nodeId = graph:AddNode("fixture.hold", { hold = 4 })
+    local preset, err = Presets.Add("Marked", graph, {}, {
+        { nodeId = nodeId, pinName = "hold" },
+    })
+    luaunit.assertNotNil(preset, err)
+    local created = 0
+    PresetDialogs.mountNewAlert(self.parent, {
+        registry = self.registry,
+        onFromPreset = function()
+            created = created + 1
+            return { kind = "open", scopeKey = "global", alertId = 8 }, 8, nil
+        end,
+    })
+    self:row("Marked").action()
+    luaunit.assertEquals(created, 0)
+    luaunit.assertEquals(self.windows[2].title, "Marked")
+    self:button(self.windows[2], "Create").action()
+    luaunit.assertEquals(created, 1)
+    luaunit.assertEquals(self.windows[#self.windows].title, "Chat permission")
 end
 
 function TestNewAlertDialog:testRenameAndDeleteRefreshTheLibraryRow()

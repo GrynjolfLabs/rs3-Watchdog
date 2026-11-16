@@ -3,6 +3,8 @@
 
 local Dialog = require("src/ui/dialog")
 local Theme = require("src/ui/theme")
+local ChatPermission = require("src/nodes/chat_permission")
+local ChatPermissionNotice = require("src/ui/chat_permission_notice")
 
 local ImportExport = {}
 
@@ -130,6 +132,9 @@ function ImportExport.mountImport(parent, opts)
                     if ok then
                         local detail = (type(report) == "table" and report.message) or "ok"
                         ImportExport.noteTransfer("import", true, detail)
+                        if type(report) == "table" and report.hasChatNode == true and not ChatPermission.Granted() then
+                            ChatPermissionNotice.mount(parent, "This import includes a Game Message or Player Chat node.")
+                        end
                         return true
                     end
                     ImportExport.noteTransfer("import", false, tostring(report))

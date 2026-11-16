@@ -11,9 +11,16 @@
 -- Chat triggers have nothing to run until then. Their gate only keeps them off the
 -- Palette. A node already on a graph stays registered.
 
+local Gates = require("src/nodes/gates")
+
 local REASON = "needs chat permission"
 
-local Gates = require("src/nodes/gates")
+-- A saved graph stores the node type on `type`. A live graph uses typeKey.
+local GATED_TYPES = {
+    ["trigger.game_message"] = true,
+    ["trigger.player_chat"] = true,
+    ["action.game_message"] = true,
+}
 
 local ChatPermission = {}
 ChatPermission.REASON = REASON
@@ -49,6 +56,20 @@ end
 ---@return boolean
 function ChatPermission.Granted()
     return granted
+end
+
+---@param graph table|nil
+---@return boolean
+function ChatPermission.GraphRequires(graph)
+    if type(graph) ~= "table" or type(graph.nodes) ~= "table" then
+        return false
+    end
+    for _, node in pairs(graph.nodes) do
+        if type(node) == "table" and GATED_TYPES[node.type] then
+            return true
+        end
+    end
+    return false
 end
 
 -- Re-read the current grant and subscribe once per event channel. Later binds in the

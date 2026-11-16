@@ -8,6 +8,8 @@ local Presets = require("src/presets")
 local Packs = require("src/packs")
 local PackRows = require("src/pack_rows")
 local PresetVariableDialog = require("src/ui/preset_variable_dialog")
+local ChatPermission = require("src/nodes/chat_permission")
+local ChatPermissionNotice = require("src/ui/chat_permission_notice")
 
 local PresetNewAlertDialog = {}
 
@@ -38,8 +40,12 @@ function PresetNewAlertDialog.mountNewAlert(parent, opts)
         offered = PackRows.AlertPresetGroups(livePacks)
     end
 
-    local function deliver(result, id, err)
-        if id ~= nil and opts.onCreated ~= nil then opts.onCreated(result) end
+    local function deliver(result, id, err, graph)
+        if id == nil then return nil, err end
+        if opts.onCreated ~= nil then opts.onCreated(result) end
+        if ChatPermission.GraphRequires(graph) and not ChatPermission.Granted() then
+            ChatPermissionNotice.mount(parent, "This alert includes a Game Message or Player Chat node.")
+        end
         return id, err
     end
 
@@ -204,7 +210,8 @@ function PresetNewAlertDialog.mountNewAlert(parent, opts)
                             if opts.onFromPreset == nil then
                                 return nil, "Could not create the alert."
                             end
-                            return deliver(opts.onFromPreset(captured.id, answers))
+                            local result, id, err = opts.onFromPreset(captured.id, answers)
+                            return deliver(result, id, err, captured.graph)
                         end)
                     end, {
                         width = width,
@@ -240,7 +247,8 @@ function PresetNewAlertDialog.mountNewAlert(parent, opts)
                                 if opts.onFromAlertPreset == nil then
                                     return nil, "Could not create the alert."
                                 end
-                                return deliver(opts.onFromAlertPreset(captured, answers))
+                                local result, id, err = opts.onFromAlertPreset(captured, answers)
+                                return deliver(result, id, err, captured.graph)
                             end)
                         end, {
                             width = width,

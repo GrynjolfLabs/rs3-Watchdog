@@ -11,6 +11,7 @@ local Store = require("src/store")
 local Compress = require("src/compress")
 local Text = require("src/text")
 local DropDismissOn = require("src/drop_dismiss_on")
+local ChatPermission = require("src/nodes/chat_permission")
 
 local Export = {}
 
@@ -40,6 +41,7 @@ Export.MAX_BYTES = 9999
 ---@field entryCount integer
 ---@field unknownCount integer
 ---@field unknownTypes string[]
+---@field hasChatNode boolean
 ---@field message string|nil
 
 ---@return LibNodeGraph.Codec|nil
@@ -217,6 +219,27 @@ local function migrateEntries(version, entries)
 end
 
 ---@param entry Watchdog.Entry
+---@return boolean
+local function entryHasChatNode(entry)
+    if entry.kind == "alert" and ChatPermission.GraphRequires(entry.graph) then
+        return true
+    end
+    for _, child in ipairs(entry.children or {}) do
+        if entryHasChatNode(child) then return true end
+    end
+    return false
+end
+
+---@param entries Watchdog.Entry[]
+---@return boolean
+local function entriesHaveChatNode(entries)
+    for _, entry in ipairs(entries) do
+        if entryHasChatNode(entry) then return true end
+    end
+    return false
+end
+
+---@param entry Watchdog.Entry
 ---@param registry LibNodeGraph.Registry
 ---@param types table<string, boolean>
 ---@param counts integer[]  # counts[1] = total unknown nodes
@@ -317,6 +340,7 @@ function Export.Import(doc, text, opts)
         entryCount = #minted,
         unknownCount = counts[1],
         unknownTypes = unknownTypes,
+        hasChatNode = entriesHaveChatNode(minted),
         message = formatReportMessage(#minted, counts[1], unknownTypes),
     }
     return true, report

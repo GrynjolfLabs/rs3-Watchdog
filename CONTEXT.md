@@ -73,7 +73,7 @@ Audio shipped inside Watchdog and offered on the Custom Sound node beside pack a
 _Avoid_: Pack audio file, custom audio file, resource
 
 **Alert Preset**:
-A Preset a Pack contributes, offered beside the Preset library while that Pack is registered. It is not a row in that library. The author assigns an author id for that contribution. That author id is not the Preset id. The player adds a copy, which is then an ordinary Alert, and that copy does not keep the author id. The snapshot is a Preset: name, serialized graph, layout, and Variables.
+A Preset a Pack contributes, offered beside the Preset library while that Pack is registered. It is not a row in that library. The author assigns an author id for that contribution. That author id is not the Preset id. The player adds a copy, which is then an ordinary Alert, and that copy does not keep the author id. Creating an Alert from that copy shows the same chat-permission dialog as creating one from a Preset. The snapshot is a Preset: name, serialized graph, layout, and Variables.
 _Avoid_: Import (that is the paste-an-export dialog); a second template type; a Preset library row
 
 ## Language
@@ -418,7 +418,10 @@ _Avoid_: Name toggle; the Manager checkbox, which flips one Entry by id
 
 **Preset**:
 A player-saved snapshot of one Alert that can be instantiated into a new Alert. Not an Entry,
-and not tied to the Alerts created from it.
+and not tied to the Alerts created from it. Instantiating one shows the chat-permission dialog
+when the snapshot contains a Game Message trigger, a Player Chat trigger, or a Game Message
+action and chat permission is not granted. The first sentence says this alert includes a Game
+Message or Player Chat node.
 _Avoid_: Template (that is a Webhook body), pack, starter, rule, Alert Preset
 
 **Preset id**:
@@ -505,7 +508,22 @@ save-to-file is designed but disabled until a filesystem API exists (#79). Expor
 dead footer action. Import is **append, never merge-by-name**. The wrapper does not import: it asks
 the caller to apply the pasted text. A failed apply leaves Import mounted and stacks a message
 Dialog on top (closing the error reveals the paste field intact). A successful apply just dismisses
-Import. There is no success notice; the Manager tree is the feedback. Every export shape (whole scope,
+Import. There is no success notice; the Manager tree is the feedback. When the appended entries
+contain a Game Message trigger, a Player Chat trigger, or a Game Message action, and chat permission
+is not granted, one modal dialog follows. Its title is Chat permission. The body is three sentences:
+This import includes a Game Message or Player Chat node. Only those nodes wait on chat permission.
+They do nothing until you grant it, and granting it later is enough. The button reads I understand
+and uses the primary style. The title-bar X closes it the same way. The imported entries stay,
+including their enabled flags. A node inside a group counts, and a disabled alert counts. Alerts
+already in the scope do not. A failed apply does not show this dialog. Creating an Alert from a
+Preset, including an Alert Preset from the starter pack, shows this same dialog when that graph
+contains one of those nodes and chat permission is not granted. Its first sentence says this alert
+includes a Game Message or Player Chat node. The other two sentences, the button, and the title-bar
+X are the same. A failed create does not show it, and From scratch does not show it. A move to the
+other scope does not show it. It does not show when an alert is enabled, when the editor opens,
+when chat permission is revoked later, or when the plugin loads. Esc does nothing, the same as
+every other dialog. This dialog is
+a permission warning, not a success notice. Every export shape (whole scope,
 single row, multi-select) passes a uniform **9,999-byte pre-flight guard** on the paste string.
 JSON that fits in 9,999 UTF-8 bytes is the paste. JSON over that cap is deflated and wrapped as a
 `WD1` token (unpadded URL-safe base64). The guard measures the token and refuses the entire export,

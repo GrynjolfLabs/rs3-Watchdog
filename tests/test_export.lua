@@ -407,6 +407,96 @@ function TestExport:testImportReportsUnknownNodeTypesNonBlocking()
     luaunit.assertEquals(unknown, 1)
 end
 
+local function singleNodePaste(typeKey)
+    return LibNodeGraph.Json.Default.encode({
+        schemaVersion = Export.SCHEMA_VERSION,
+        pluginVersion = "0.1.0",
+        entries = {
+            {
+                kind = "alert",
+                name = "line",
+                enabled = true,
+                graph = {
+                    version = 1,
+                    nodes = { { id = 1, type = typeKey, controls = {} } },
+                    connections = {},
+                },
+                layout = {},
+            },
+        },
+    })
+end
+
+function TestExport:testImportReportsAGameMessageTriggerAsAChatNode()
+    local doc = Store.Empty()
+    local ok, report = Export.Import(doc, singleNodePaste("trigger.game_message"))
+    luaunit.assertTrue(ok)
+    luaunit.assertEquals(report.hasChatNode, true)
+end
+
+function TestExport:testImportReportsPlayerChatAndGameMessageActionAsChatNodes()
+    for _, typeKey in ipairs({ "trigger.player_chat", "action.game_message" }) do
+        local doc = Store.Empty()
+        local ok, report = Export.Import(doc, singleNodePaste(typeKey))
+        luaunit.assertTrue(ok)
+        luaunit.assertEquals(report.hasChatNode, true)
+    end
+end
+
+function TestExport:testImportReportsAChatNodeInsideADisabledGroup()
+    local payload = LibNodeGraph.Json.Default.encode({
+        schemaVersion = Export.SCHEMA_VERSION,
+        pluginVersion = "0.1.0",
+        entries = {
+            {
+                kind = "group",
+                name = "Quiet",
+                enabled = false,
+                children = {
+                    {
+                        kind = "alert",
+                        name = "asleep",
+                        enabled = false,
+                        graph = {
+                            version = 1,
+                            nodes = { { id = 1, type = "trigger.player_chat", controls = {} } },
+                            connections = {},
+                        },
+                        layout = {},
+                    },
+                },
+            },
+        },
+    })
+    local doc = Store.Empty()
+    local ok, report = Export.Import(doc, payload)
+    luaunit.assertTrue(ok)
+    luaunit.assertEquals(report.hasChatNode, true)
+    luaunit.assertEquals(doc.entries[1].enabled, false)
+    luaunit.assertEquals(doc.entries[1].children[1].enabled, false)
+end
+
+function TestExport:testImportIgnoresChatNodesAlreadyInTheScope()
+    local doc = Store.Empty()
+    local existing = Store.MintId(doc)
+    Store.InsertEntry(doc, {
+        id = existing,
+        kind = "alert",
+        name = "already",
+        enabled = true,
+        graph = {
+            version = 1,
+            nodes = { { id = 1, type = "action.game_message", controls = {} } },
+            connections = {},
+        },
+        layout = {},
+    }, nil)
+    local ok, report = Export.Import(doc, singleNodePaste("fixture.trigger"))
+    luaunit.assertTrue(ok)
+    luaunit.assertEquals(report.hasChatNode, false)
+    luaunit.assertEquals(#doc.entries, 2)
+end
+
 function TestExport:testImportRejectsBadEntryBeforeAnyWrite()
     local doc = Store.Empty()
     seedAlert(doc, self.registry, "keep", true)
