@@ -26,6 +26,7 @@
 - [x] 21. bundle some good example presets and alerts ([#154](https://github.com/adamk33n3r/rs3-Watchdog/issues/154)) _(Watchdog Starter Pack: Friend login, Idle XP, Tick Counter, Low life points, Low prayer. Copies are ordinary Alerts. A missing global Bucket stays empty.)_
 - [x] 22. close palette when opening dialog _(A toolbar button press closes the Palette before that button runs.)_
 - [ ] 23. add chat picker
+- [ ] 24. look into other inventories (like wood/ore box)
 
 ## Node port backlog (mirroring runelite-watchdog)
 
