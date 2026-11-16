@@ -133,14 +133,7 @@ function Node.BuildGeometry(pins, x, y, width, opts)
         end
     end
 
-    -- Config is not a pin. It occupies body rows under the input pins so a checkbox
-    -- can be toggled without offering a wire socket.
-    local config = {}
-    if not placeholder and opts ~= nil and type(opts.config) == "table" then
-        config = opts.config
-    end
-
-    local rows = math.max(#inputs, #outputs, #inputs + #config)
+    local rows = math.max(#inputs, #outputs)
 
     -- Mode strip (ADR-0011) sits under the header when this instance's type has modes.
     -- Not a pin: `opts.modeLabel` is the current mode's display label, or nil.
@@ -173,7 +166,7 @@ function Node.BuildGeometry(pins, x, y, width, opts)
     local height = rowTop[rows + 1] + extraBodyH + Theme.BODY_PAD_BOTTOM
 
     local geom = { x = x, y = y, w = width, h = height,
-        pins = {}, byName = {}, controls = {}, configLabels = {}, testButtons = {}, placeholder = placeholder }
+        pins = {}, byName = {}, controls = {}, testButtons = {}, placeholder = placeholder }
     if extraBodyH > 0 then
         geom.viewerGrid = {
             x = Theme.PIN_MARGIN_X,
@@ -248,9 +241,8 @@ function Node.BuildGeometry(pins, x, y, width, opts)
         return Theme.TextWidth(12, text) or (#text * Theme.CONTROL_LABEL_CHAR_W)
     end
 
-    -- `left` is already past the row's own label. A pin label starts after the glyph.
-    -- A config check has no glyph, so that caller passes the margin instead.
-    -- The box then stops short of an output label on the same row.
+    -- `left` is already past the row's own label. The box stops short of an output
+    -- label on the same row.
     ---@param pinControl { Layout: fun(band: table): table|nil, Inline: boolean }
     ---@param name string
     ---@param defaultValue any
@@ -316,27 +308,6 @@ function Node.BuildGeometry(pins, x, y, width, opts)
                     }
                 end
             end
-        end
-    end
-
-    -- Config rows sit after input pins. No glyph: the label is the check's name,
-    -- and the checkbox is an ordinary control the editor commits by that name.
-    for i, cfg in ipairs(config) do
-        local row = #inputs + i
-        local label = cfg.label or cfg.name or ""
-        local cy = rowTop[row] + Theme.PIN_ROW_HEIGHT * 0.5
-        geom.configLabels[#geom.configLabels + 1] = {
-            label = label,
-            x = Theme.PIN_MARGIN_X,
-            cy = cy,
-        }
-        local pinControl = Controls.PinControlForPin(typeKey, {
-            name = cfg.name,
-            dataType = cfg.dataType or "bool",
-        })
-        if pinControl ~= nil and pinControl.Inline then
-            local left = Theme.PIN_MARGIN_X + labelWidth(label) + Theme.CONTROL_LABEL_GAP
-            layoutInline(pinControl, cfg.name, cfg.default, left, cy, outputs[row])
         end
     end
 
@@ -432,8 +403,6 @@ function Node.Draw(canvas, view, geom, meta, opts)
 
     local hs = view:Scale(Theme.PIN_GLYPH) * 0.5
     local labelFont = showLabels and Theme.Font(12 * view.zoom) or nil
-    -- Same baseline for a pin label and a config check. Callers pass x, because a pin
-    -- sits past its glyph and a check starts at the margin.
     ---@param text string
     ---@return number
     local function labelPixelWidth(text)
@@ -470,13 +439,6 @@ function Node.Draw(canvas, view, geom, meta, opts)
                 -- Right-align output labels against the glyph (measured at the drawn size).
                 drawLabel(pcx - hs - view:Scale(Theme.PIN_LABEL_GAP) - tw, pcy, pin.label, tw)
             end
-        end
-    end
-
-    for _, row in ipairs(geom.configLabels or {}) do
-        if labelFont ~= nil then
-            local tx, ty = view:ToScreen(geom.x + row.x, geom.y + row.cy)
-            drawLabel(tx, ty, row.label, labelPixelWidth(row.label))
         end
     end
 

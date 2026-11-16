@@ -580,9 +580,6 @@ function Editor:buildGeoms()
             if nt ~= nil and nt.modes ~= nil then
                 opts.modeLabel = modeLabelOf(nt, self.graph:GetMode(n.id))
             end
-            if nt ~= nil and nt.config ~= nil then
-                opts.config = nt.config
-            end
             if n.typeKey == InvViewer.TYPE_KEY then
                 local extra = InvViewer.ExtraBodyOpts(self.view.zoom)
                 opts.extraBodyH = extra.extraBodyH

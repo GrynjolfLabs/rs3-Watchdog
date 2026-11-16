@@ -549,7 +549,7 @@ successful Select Object. If Watchdog was already hidden by the shell key, it st
 _Avoid_: toast, notification, armed banner, overlay prompt
 
 **Player Input** (`trigger.player_input`):
-A Trigger that pulses when any checked local input happens. It listens the whole time its Alert is armed and enabled, and the pulse does not say which input it was. The checks are config on the node. Mouse move is the cursor position changing. Keyboard is a key going down. Mouse click is the minimenu opening, an entry being selected, or the minimenu closing. Each of those events pulses on its own. A new Player Input has all three checks on. The starter pack's Player Input does too. An alert already made from that pack is a saved graph, and its checks migrate with the graph.
+A Trigger that pulses when any checked local input happens. It listens the whole time its Alert is armed and enabled, and the pulse does not say which input it was. Mouse move, Keyboard, and Mouse click are bool pins, so each one is a checkbox or a wire. Mouse move is the cursor position changing. Keyboard is a key going down. Mouse click is the minimenu opening, an entry being selected, or the minimenu closing. Each of those events pulses on its own. A new Player Input has all three checks on. The starter pack's Player Input does too. An alert already made from that pack is a saved graph, and its checks migrate with the graph.
 _Avoid_: Activity, Player Activity, Dismiss On, Menu opened, Menu closed
 
 **Chat Trigger**:

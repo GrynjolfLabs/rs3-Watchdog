@@ -52,5 +52,26 @@ local catalog = {
             },
         },
     },
+    {
+        version = "1.0.1",
+        paragraphs = {
+            { title = "Watchdog 1.0.1 is out!" },
+            "A small one this time. Screen Flash does what the Cycles pin says, Sound Effect can be quieter and repeat, and your old alerts should keep working the way they already do.",
+
+            { title = "Screen Flash" },
+            "Cycles is how many times the flash rises and falls. Leave Sticky off and it plays that many, then it stops. Turn Sticky on and it keeps going until something hits Dismiss.",
+            "You can use a fraction too. That extra bit is only the next rise. Rise 1, Fall 1, and Cycles 2.5 plays two full flashes, then half of the next rise, and it ends at 4.5 seconds.",
+            "If you already had a flash set to dismiss on mouse, keyboard, or both, it still does. Loading it adds a Player Input on Dismiss with those same checks, so you do not have to rebuild it. A flash saved before Sticky existed keeps looping, same as before.",
+
+            { title = "Player Input" },
+            "Player Input fires when you move the mouse, click, or press a key. Each of those is a checkbox on the node. Leave it on, turn it off, or wire a bool into it.",
+
+            { title = "Sound Effect" },
+            "Sound Effect now has Volume and Loops, same as Custom Sound. Volume is a percent, and 100 is as loud as it goes. Loops starts at 0.",
+
+            { title = "Editor" },
+            "Dragged the info box or a toast somewhere and want them back? Reset Positions is on the Watchdog panel, and it puts both back where they started. A long import or export paste shows every line now too.",
+        },
+    },
 }
 return catalog

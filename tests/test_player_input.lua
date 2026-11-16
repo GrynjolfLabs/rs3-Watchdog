@@ -11,7 +11,6 @@ local Runtime = require("src/runtime")
 local newFakeEventSource = require("fake_event_source")
 local PlayerInput = require("src/nodes/triggers/player_input")
 local Presets = require("src/presets")
--- Loads the checkbox widget. A bool data-in pin is markable; the checks must not be.
 require("src/ui/controls")
 
 TestPlayerInput = {}
@@ -36,11 +35,10 @@ function TestPlayerInput:testNewNodeChecksStartOnAndStayAfterSave()
     local id = self.graph:AddNode("trigger.player_input")
     local nodeType = self.registry:GetNodeType("trigger.player_input")
     luaunit.assertEquals(nodeType.displayName, "Player Input")
-    luaunit.assertEquals({
-        nodeType.config[1].label,
-        nodeType.config[2].label,
-        nodeType.config[3].label,
-    }, { "Mouse move", "Keyboard", "Mouse click" })
+    luaunit.assertEquals(nodeType.pinOrder, { "mouseMove", "keyboard", "mouseClick", "out" })
+    luaunit.assertEquals(nodeType.pins.mouseMove.label, "Mouse move")
+    luaunit.assertEquals(nodeType.pins.keyboard.label, "Keyboard")
+    luaunit.assertEquals(nodeType.pins.mouseClick.label, "Mouse click")
 
     luaunit.assertEquals(self.graph:GetControl(id, "mouseMove"), true)
     luaunit.assertEquals(self.graph:GetControl(id, "keyboard"), true)
@@ -64,34 +62,34 @@ function TestPlayerInput:testAddNodeKeepsAnExplicitOffCheck()
     luaunit.assertEquals(self.graph:GetControl(id, "mouseClick"), false)
 end
 
-function TestPlayerInput:testChecksCannotBeWiredOrMarkedAsVariables()
+function TestPlayerInput:testChecksArePinsAndPresetVariables()
     local id = self.graph:AddNode("trigger.player_input")
     local names = {}
     for _, pin in ipairs(self.graph:GetPins(id)) do
         names[#names + 1] = pin.name
     end
-    luaunit.assertEquals(names, { "out" })
+    luaunit.assertEquals(names, { "mouseMove", "keyboard", "mouseClick", "out" })
+
+    luaunit.assertEquals(Presets.Eligible(self.graph), {
+        { nodeId = id, pinName = "mouseMove" },
+        { nodeId = id, pinName = "keyboard" },
+        { nodeId = id, pinName = "mouseClick" },
+    })
 
     self.registry:RegisterNodeType("fixture.flag", {
-        category = "action",
+        category = "pure",
         pins = {
-            { name = "in", kind = "exec", direction = "in" },
-            { name = "flag", kind = "data", direction = "in", dataType = "bool", default = false },
             { name = "value", kind = "data", direction = "out", dataType = "bool" },
         },
         run = function() end,
     })
-    local flag = self.graph:AddNode("fixture.flag")
     local source = self.graph:AddNode("fixture.flag")
-    for _, check in ipairs({ "mouseMove", "keyboard", "mouseClick" }) do
-        local conn, reason = self.graph:Connect(source, "value", id, check)
-        luaunit.assertNil(conn)
-        luaunit.assertEquals(reason, "unknown_pin")
-    end
-
+    local conn, reason = self.graph:Connect(source, "value", id, "keyboard")
+    luaunit.assertNotNil(conn)
+    luaunit.assertNil(reason)
     luaunit.assertEquals(Presets.Eligible(self.graph), {
-        { nodeId = flag, pinName = "flag" },
-        { nodeId = source, pinName = "flag" },
+        { nodeId = id, pinName = "mouseMove" },
+        { nodeId = id, pinName = "mouseClick" },
     })
 end
 
@@ -237,7 +235,7 @@ function TestPlayerInput:testExecOutputWiresToAnExistingDismissPin()
             dataPins[#dataPins + 1] = pin.name
         end
     end
-    luaunit.assertEquals(dataPins, {})
+    luaunit.assertEquals(dataPins, { "mouseMove", "keyboard", "mouseClick" })
 end
 
 function TestPlayerInput:testPaletteOffersPlayerInput()
@@ -257,7 +255,7 @@ function TestPlayerInput:testPaletteOffersPlayerInput()
     luaunit.assertNil(found.unavailable)
 end
 
-function TestPlayerInput:testEditorShowsChecksWithoutPinSockets()
+function TestPlayerInput:testEditorShowsCheckboxesOnThePins()
     local Editor = require("src/ui/graph")
     local id = self.graph:AddNode("trigger.player_input")
     local editor = setmetatable({
@@ -270,9 +268,10 @@ function TestPlayerInput:testEditorShowsChecksWithoutPinSockets()
     }, { __index = Editor })
     editor:buildGeoms()
     local geom = editor.geoms[id]
-    luaunit.assertNil(geom.byName.mouseMove)
-    luaunit.assertNil(geom.byName.keyboard)
-    luaunit.assertNil(geom.byName.mouseClick)
+    luaunit.assertEquals(geom.byName.mouseMove.label, "Mouse move")
+    luaunit.assertEquals(geom.byName.keyboard.label, "Keyboard")
+    luaunit.assertEquals(geom.byName.mouseClick.label, "Mouse click")
+    luaunit.assertEquals(geom.byName.mouseMove.kind, "data")
 
     local controls = {}
     for _, ctrl in ipairs(geom.controls) do
@@ -282,30 +281,25 @@ function TestPlayerInput:testEditorShowsChecksWithoutPinSockets()
     luaunit.assertEquals(geom.controls[1].value, true)
     luaunit.assertEquals(geom.controls[2].value, true)
     luaunit.assertEquals(geom.controls[3].value, true)
-
-    local labels = {}
-    for _, row in ipairs(geom.configLabels) do
-        labels[#labels + 1] = row.label
-    end
-    luaunit.assertEquals(labels, { "Mouse move", "Keyboard", "Mouse click" })
 end
 
-function TestPlayerInput:testModeChangeKeepsACheck()
-    -- Config shares the control map. A mode reconstruct must not drop it.
-    self.registry:RegisterNodeType("fixture.moded", {
-        category = "action",
-        defaultMode = "a",
-        modes = {
-            { key = "a", pins = { { name = "out", kind = "exec", direction = "out" } } },
-            { key = "b", pins = { { name = "out", kind = "exec", direction = "out" } } },
+function TestPlayerInput:testAWiredBoolDrivesTheCheck()
+    self:listen()
+    local value = false
+    self.registry:RegisterNodeType("fixture.bool", {
+        category = "pure",
+        pins = {
+            { name = "value", kind = "data", direction = "out", dataType = "bool" },
         },
-        config = {
-            { name = "keyboard", dataType = "bool", default = true, label = "Keyboard" },
-        },
-        run = function() end,
+        run = function(ctx) ctx:Out("value", value) end,
     })
-    local id = self.graph:AddNode("fixture.moded")
-    self.graph:SetControl(id, "keyboard", false)
-    luaunit.assertTrue(self.graph:SetMode(id, "b"))
-    luaunit.assertEquals(self.graph:GetControl(id, "keyboard"), false)
+    local source = self.graph:AddNode("fixture.bool")
+    luaunit.assertNotNil(self.graph:Connect(source, "value", self.inputId, "keyboard"))
+    self.graph:SetControl(self.inputId, "keyboard", false)
+    self.source:Push("KeyDown", { gameKey = "A" })
+    luaunit.assertEquals(self.seen, {})
+
+    value = true
+    self.source:Push("KeyDown", { gameKey = "B" })
+    luaunit.assertEquals(#self.seen, 1)
 end
