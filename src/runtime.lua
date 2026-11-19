@@ -44,6 +44,7 @@ local Util = require("src/util")
 ---@field toast any|nil                                    # ToastStack, wired by main.lua
 ---@field keyboardActivityTick integer
 ---@field mouseActivityTick integer
+---@field miniMenuActivityTick integer
 ---@field new fun(eventSource: any|nil, mouseSource: any|nil, identitySource: Watchdog.IdentitySource|nil): Watchdog.Runtime
 ---@field SetBucketLoader fun(self: Watchdog.Runtime, loader: fun(trackingId: string): Watchdog.RestoredAlert[])
 ---@field GetActiveCharacter fun(self: Watchdog.Runtime): string|nil, string|nil
@@ -134,6 +135,7 @@ function Runtime.new(eventSource, mouseSource, identitySource)
         pollSeedKey = setmetatable({}, { __mode = "k" }),
         keyboardActivityTick = 0,
         mouseActivityTick = 0,
+        miniMenuActivityTick = 0,
         _lastMousePos = nil,
     }, Runtime)
     self:_bindActivityTracking()
@@ -146,16 +148,32 @@ function Runtime.new(eventSource, mouseSource, identitySource)
     return self
 end
 
+-- Every left-click and every right-click menu pick selects a MiniMenu entry.
+local MINIMENU_EVENTS = { "MiniMenuOpened", "MiniMenuClosed", "MiniMenuEntrySelected" }
+
 function Runtime:_bindActivityTracking()
-    local source = self.eventSource.KeyDown
-    if source == nil or source.Subscribe == nil then
-        return
-    end
     local runtime = self
-    source.Subscribe("watchdog_runtime_activity_key", function()
-        runtime.keyboardActivityTick = runtime.keyboardActivityTick + 1
-    end)
-    self._activitySource = source
+    local source = self.eventSource.KeyDown
+    if source ~= nil and source.Subscribe ~= nil then
+        source.Subscribe("watchdog_runtime_activity_key", function(payload)
+            -- A held key repeats KeyDown; only a new press counts. Payloads are userdata.
+            local ok, isRepeat = pcall(function() return payload.isRepeat end)
+            if not (ok and isRepeat) then
+                runtime.keyboardActivityTick = runtime.keyboardActivityTick + 1
+            end
+        end)
+        self._activitySource = source
+    end
+    self._miniMenuSources = {}
+    for _, name in ipairs(MINIMENU_EVENTS) do
+        local channel = self.eventSource[name]
+        if channel ~= nil and channel.Subscribe ~= nil then
+            channel.Subscribe("watchdog_runtime_activity_minimenu", function()
+                runtime.miniMenuActivityTick = runtime.miniMenuActivityTick + 1
+            end)
+            table.insert(self._miniMenuSources, channel)
+        end
+    end
 end
 
 --- Player scoping -------------------------------------------------------------------------
@@ -849,6 +867,10 @@ function Runtime:Stop()
         pcall(function() self._activitySource.Unsubscribe("watchdog_runtime_activity_key") end)
         self._activitySource = nil
     end
+    for _, channel in ipairs(self._miniMenuSources or {}) do
+        pcall(function() channel.Unsubscribe("watchdog_runtime_activity_minimenu") end)
+    end
+    self._miniMenuSources = {}
     if self._lifecycleSource ~= nil then
         pcall(function() self._lifecycleSource.Unsubscribe("watchdog_runtime_gamestate") end)
         self._lifecycleSource = nil
