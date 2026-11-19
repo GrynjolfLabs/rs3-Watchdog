@@ -242,6 +242,26 @@ local function lowOnFood(registry)
     }
 end
 
+-- Rings once the player has been idle for X seconds.
+---@param registry LibNodeGraph.Registry
+---@return Watchdog.PackAlertPreset
+local function lobbyTimer(registry)
+    local graph = LibNodeGraph.NewGraph(registry)
+    local idle = graph:AddNode("trigger.idle", { seconds = 570 }, { name = "Idle for X seconds" })
+    local sound = graph:AddNode("action.sound", { soundId = id.Sound.TOWN_CRIER_BELL_RING_1 }, { name = "Ding" })
+    connect(graph, "Lobby Timer", idle, "Idle", sound, "in")
+    return {
+        authorId = "lobby-timer",
+        name = "Lobby Timer",
+        graph = LibNodeGraph.Serialize(graph),
+        layout = layoutArray({
+            [idle] = { x = 9, y = 11 },
+            [sound] = { x = 300, y = 11 },
+        }),
+        variables = { { nodeId = idle, pinName = "seconds" } },
+    }
+end
+
 ---@param api { RegisterDataPack: fun(self, name: string, contributions: table|nil) }
 ---@param registry LibNodeGraph.Registry
 function StarterAlerts.register(api, registry)
@@ -254,6 +274,7 @@ function StarterAlerts.register(api, registry)
             idleXp(registry),
             tickCounter(registry),
             lowOnFood(registry),
+            lobbyTimer(registry),
             lowResource(registry, "life", "low-life-points", "Low life points", alertBells, FLASH_RED, "Life"),
             lowResource(registry, "prayer", "low-prayer", "Low prayer", horn, FLASH_PRAYER, "Prayer"),
         },

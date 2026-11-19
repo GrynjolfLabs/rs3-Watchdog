@@ -239,7 +239,7 @@ function TestStarterAlerts:testIdleXpCopiesAnOrdinaryAlert()
     end
     table.sort(authorIds)
     luaunit.assertEquals(authorIds, {
-        "friend-login", "idle-xp", "low-life-points", "low-on-food", "low-prayer", "tick-counter",
+        "friend-login", "idle-xp", "lobby-timer", "low-life-points", "low-on-food", "low-prayer", "tick-counter",
     })
 
     local idle = self.packs:GetAlertPreset("Watchdog Starter Pack", "idle-xp")
