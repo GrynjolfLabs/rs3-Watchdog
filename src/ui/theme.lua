@@ -214,6 +214,7 @@ Theme.COL_NODE_BORDER = col(15, 15, 18, 1.0)
 Theme.COL_NODE_UNKNOWN_BODY   = col(38, 36, 40, 0.94)
 Theme.COL_NODE_UNKNOWN_HEADER = col(74, 68, 60, 1.0)   -- muted amber-grey (a warning, dimmed)
 Theme.COL_NODE_SEL    = col(240, 160, 32, 1.0)  -- selected/hovered node border
+Theme.COL_MARQUEE_FILL = col(240, 160, 32, 0.12) -- Shift+drag selection box
 Theme.COL_TITLE       = col(240, 240, 244, 1.0)
 Theme.COL_PIN_LABEL   = col(198, 200, 208, 1.0)
 
