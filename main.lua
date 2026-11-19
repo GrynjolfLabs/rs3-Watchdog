@@ -11,6 +11,7 @@ local Effects             = require("src/effects")
 local InfoBoxArea         = require("src/ui/infobox")
 local ScreenMarkerCapture = require("src/ui/screen_marker_capture")
 local ObjectMarkerCapture = require("src/ui/object_marker_capture")
+local BuffCapture         = require("src/ui/buff_capture")
 local ToastStack          = require("src/toast")
 local Theme               = require("src/ui/theme")
 local Dialog              = require("src/ui/dialog")
@@ -61,6 +62,7 @@ local effects = Effects.new()
 local infobox = InfoBoxArea.new()
 local screenMarkerCapture = ScreenMarkerCapture.new()
 local objectMarkerCapture = ObjectMarkerCapture.new()
+local buffCapture = BuffCapture.new()
 
 local TOAST_ANCHOR_KEY = "watchdog_toast_anchor"
 local toast = ToastStack.new(effects, {
@@ -87,6 +89,7 @@ runtime.effects = effects
 runtime.infobox = infobox
 runtime.screenMarkerCapture = screenMarkerCapture
 runtime.objectMarkerCapture = objectMarkerCapture
+runtime.buffCapture = buffCapture
 runtime.toast = toast
 
 local registry = LibNodeGraph.NewRegistry()
@@ -99,6 +102,7 @@ require("src/nodes/triggers/skill").Register(registry, runtime)
 require("src/nodes/triggers/resource").Register(registry, runtime)
 require("src/nodes/triggers/entity_spawn").Register(registry, runtime)
 require("src/nodes/triggers/inventory").Register(registry, runtime)
+require("src/nodes/triggers/buff").Register(registry, runtime)
 require("src/nodes/actions/log").Register(registry)
 require("src/nodes/actions/sound").Register(registry)
 require("src/nodes/actions/custom_sound").Register(registry)
@@ -540,7 +544,7 @@ editor.onAlertNameChanged = function()
     mux:SyncTitle()
 end
 
-runtime.objectMarkerCapture.onArmedChange = function(armed)
+local function onCaptureArmedChange(armed)
     if mux == nil then return end
     if armed then
         mux:HideForCapture()
@@ -548,6 +552,8 @@ runtime.objectMarkerCapture.onArmedChange = function(armed)
         mux:RestoreFromCapture()
     end
 end
+runtime.objectMarkerCapture.onArmedChange = onCaptureArmedChange
+runtime.buffCapture.onArmedChange = onCaptureArmedChange
 
 managerSurface = {
     id = "manager",
@@ -707,6 +713,7 @@ local function onDraw(drawEvent)
         end)
         pcall(function() runtime.screenMarkerCapture:Draw(runtime.effects.canvas) end)
         pcall(function() runtime.objectMarkerCapture:Draw(runtime.effects.canvas) end)
+        pcall(function() runtime.buffCapture:Draw(runtime.effects.canvas) end)
     end
     if mux ~= nil then mux:SyncChrome() end
 end
@@ -736,6 +743,8 @@ function api:Clear(token)
 end
 
 function api.Stop()
+    runtime.buffCapture.onArmedChange = nil
+    pcall(function() runtime.buffCapture:Cancel() end)
     if runtime.objectMarkerCapture ~= nil then
         runtime.objectMarkerCapture.onArmedChange = nil
         -- Unsubscribe MiniMenuReady so reload does not leak the prior instance.
@@ -767,6 +776,10 @@ end
 
 function api.Toggle()
     if mux == nil then return end
+    if runtime.buffCapture:IsArmed() then
+        runtime.buffCapture:Cancel()
+        return
+    end
     if runtime.objectMarkerCapture ~= nil and runtime.objectMarkerCapture:IsArmed() then
         runtime.objectMarkerCapture:Cancel()
         return
@@ -785,6 +798,10 @@ Event.Draw.Subscribe(Events.Draw, onDraw)
 Event.KeyDown.Subscribe(Events.KeyDown, function(keyEvent)
     if keyEvent == nil or keyEvent.isRepeat then return end
     if keyEvent.gameKey == GameKey.ESCAPE then
+        if runtime.buffCapture:IsArmed() then
+            runtime.buffCapture:Cancel()
+            return
+        end
         if runtime.objectMarkerCapture ~= nil and runtime.objectMarkerCapture:IsArmed() then
             runtime.objectMarkerCapture:Cancel()
             return

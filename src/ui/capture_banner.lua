@@ -4,6 +4,7 @@ local CaptureBanner = {}
 
 CaptureBanner.SCREEN_TEXT = "Drag to select a region · Esc to cancel"
 CaptureBanner.OBJECT_TEXT = "Select Object on scenery · Esc to cancel"
+CaptureBanner.BUFF_TEXT = "Click a buff in the window · Esc to cancel"
 
 local BANNER_H = 40
 local BANNER_PAD_Y = 8
