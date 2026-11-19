@@ -1256,6 +1256,18 @@ function Editor:armScreenMarkerCapture(nodeId, pinName)
         function(rect) self:setControl(nodeId, pinName, rect) end)
 end
 
+function Editor:armBuffCapture(nodeId, pinName)
+    if self.runtime == nil then return end
+    if self.runtime.screenMarkerCapture ~= nil and self.runtime.screenMarkerCapture:IsArmed() then
+        self.runtime.screenMarkerCapture:Cancel()
+    end
+    toggleMarkerCapture(
+        self.runtime.buffCapture,
+        self.runtime.objectMarkerCapture,
+        nodeId, pinName,
+        function(pick) self:setControl(nodeId, pinName, pick) end)
+end
+
 function Editor:armObjectMarkerCapture(nodeId, pinName)
     if self.runtime == nil then return end
     toggleMarkerCapture(
@@ -1270,7 +1282,8 @@ end
 ---@return boolean
 function Editor:isCaptureArmed(nodeId, pinName)
     if self.runtime == nil then return false end
-    for _, cap in ipairs({ self.runtime.screenMarkerCapture, self.runtime.objectMarkerCapture }) do
+    for _, cap in ipairs({ self.runtime.screenMarkerCapture, self.runtime.objectMarkerCapture,
+        self.runtime.buffCapture }) do
         if cap ~= nil and cap:IsArmed() and cap.nodeId == nodeId and cap.pinName == pinName then
             return true
         end
@@ -1383,6 +1396,11 @@ function Editor:onEscape()
         self.runtime.objectMarkerCapture:Cancel()
         return
     end
+    if self.runtime ~= nil and self.runtime.buffCapture ~= nil
+        and self.runtime.buffCapture:IsArmed() then
+        self.runtime.buffCapture:Cancel()
+        return
+    end
     self:goBack()
 end
 
@@ -1426,7 +1444,9 @@ function Editor:controlHost(nodeId, ctrl)
             editor:openColorPopup(nodeId, ctrl, codec)
         end,
         ArmCapture = function(_, kind)
-            if kind == "object" then
+            if kind == "buff" then
+                editor:armBuffCapture(nodeId, ctrl.pinName)
+            elseif kind == "object" then
                 editor:armObjectMarkerCapture(nodeId, ctrl.pinName)
             else
                 editor:armScreenMarkerCapture(nodeId, ctrl.pinName)

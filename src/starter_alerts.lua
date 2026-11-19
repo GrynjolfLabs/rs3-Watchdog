@@ -242,6 +242,32 @@ local function lowOnFood(registry)
     }
 end
 
+---@param registry LibNodeGraph.Registry
+---@return Watchdog.PackAlertPreset
+local function buffAlert(registry)
+    local graph = LibNodeGraph.NewGraph(registry)
+    local buff = graph:AddNode("trigger.buff", {
+        condition = "on", operation = "<=", threshold = 10,
+    }, { name = "Buff" })
+    local toast = graph:AddNode("action.toast", {
+        color = { r = 240, g = 160, b = 32, a = 255 },
+        sticky = false,
+        hold = 5,
+    }, { name = "Toast" })
+    connect(graph, "Buff alert", buff, "out", toast, "show")
+    connect(graph, "Buff alert", buff, "message", toast, "text")
+    connect(graph, "Buff alert", buff, "icon", toast, "icon")
+    return {
+        authorId = "buff-alert",
+        name = "Buff alert",
+        graph = LibNodeGraph.Serialize(graph),
+        layout = layoutArray({
+            [buff] = { x = 40, y = 30 },
+            [toast] = { x = 420, y = 30 },
+        }),
+    }
+end
+
 ---@param api { RegisterDataPack: fun(self, name: string, contributions: table|nil) }
 ---@param registry LibNodeGraph.Registry
 function StarterAlerts.register(api, registry)
@@ -250,6 +276,7 @@ function StarterAlerts.register(api, registry)
     local alertBellsLong = id.Sound.MAH3_HEIST_ALARM
     api:RegisterDataPack("Watchdog Starter Pack", {
         alertPresets = {
+            buffAlert(registry),
             friendLogin(registry),
             idleXp(registry),
             tickCounter(registry),
