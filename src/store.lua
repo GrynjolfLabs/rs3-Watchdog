@@ -915,6 +915,26 @@ local function scopeIsFrozen(key)
     return true
 end
 
+-- True is the only success. False, nil, and a throw leave the key. The
+-- remembered token is dropped so the next alert that reuses this id is written.
+---@param identity string
+---@param id integer
+---@return boolean
+local function deleteStoredAlert(identity, id)
+    local key = alertStorageKey(identity, id)
+    if key == nil or PersistentDB == nil then return false end
+    local ok, deleted = pcall(function() return PersistentDB:Delete(key) end)
+    if not ok or deleted ~= true then
+        if log ~= nil then
+            log("Watchdog: failed to delete alert key '" .. key .. "'")
+        end
+        return false
+    end
+    tokenMemory()[key] = nil
+    blocked[key] = nil
+    return true
+end
+
 ---@param identity string
 ---@param entry Watchdog.Entry
 ---@return boolean
@@ -953,6 +973,95 @@ function Store.SaveScope(identity, doc)
         payload.infoboxAnchor = { x = doc.infoboxAnchor.x, y = doc.infoboxAnchor.y }
     end
     return writeToken(key, payload)
+end
+
+-- One alert changed. A scope that already has its key writes that alert and
+-- leaves every other graph alone. While the new key is still absent, every
+-- alert has to be stored before the tree, or the next load would list a graph
+-- that was never written.
+---@param identity string
+---@param doc Watchdog.Bucket
+---@param entry Watchdog.Entry
+---@return boolean
+---@return "size"|"failed"|nil reason
+---@return string|nil name
+function Store.SaveEditedAlert(identity, doc, entry)
+    if Store.ScopeStorage(identity) ~= "split" then
+        return Store.PersistScope(identity, doc)
+    end
+    return Store.SaveAlert(identity, entry)
+end
+
+-- The tree changed and no graph did. Same split: the scope key alone. A scope
+-- still on the legacy document stores every alert first, then the tree.
+---@param identity string
+---@param doc Watchdog.Bucket
+---@return boolean
+---@return "size"|"failed"|nil reason
+---@return string|nil name
+function Store.SaveTree(identity, doc)
+    if Store.ScopeStorage(identity) ~= "split" then
+        return Store.PersistScope(identity, doc)
+    end
+    return Store.SaveScope(identity, doc)
+end
+
+-- The tree no longer names these alerts. Write that tree first. Only a scope
+-- that already had its key has alert keys to delete, and only after the tree
+-- write returns true. A failed delete leaves the key. The alert stays out of
+-- the tree either way.
+---@param identity string
+---@param doc Watchdog.Bucket
+---@param ids integer[]
+---@return boolean
+---@return "size"|"failed"|nil reason
+---@return string|nil name
+function Store.RemoveAlerts(identity, doc, ids)
+    if Store.ScopeStorage(identity) ~= "split" then
+        return Store.PersistScope(identity, doc)
+    end
+    local ok, reason = Store.SaveScope(identity, doc)
+    if not ok then return false, reason end
+    for _, id in ipairs(ids or {}) do
+        deleteStoredAlert(identity, id)
+    end
+    return true
+end
+
+-- Destination alert keys first, then the destination tree, then the source
+-- tree, then each source key. A failed write stops before the delete, so the
+-- source tree still names a graph that is still stored. A failed delete leaves
+-- the source key. The same id in two scopes is two keys.
+---@param srcIdentity string
+---@param srcDoc Watchdog.Bucket
+---@param destIdentity string
+---@param destDoc Watchdog.Bucket
+---@param destEntries Watchdog.Entry[]
+---@param srcIds integer[]
+---@return boolean
+---@return "size"|"failed"|nil reason
+---@return string|nil name
+function Store.TransferAlerts(srcIdentity, srcDoc, destIdentity, destDoc, destEntries, srcIds)
+    if Store.ScopeStorage(destIdentity) == "split" then
+        for _, entry in ipairs(destEntries or {}) do
+            local ok, reason = Store.SaveAlert(destIdentity, entry)
+            if not ok then return false, reason, entry.name end
+        end
+        local ok, reason = Store.SaveScope(destIdentity, destDoc)
+        if not ok then return false, reason end
+    else
+        local ok, reason, name = Store.PersistScope(destIdentity, destDoc)
+        if not ok then return false, reason, name end
+    end
+    if Store.ScopeStorage(srcIdentity) ~= "split" then
+        return Store.PersistScope(srcIdentity, srcDoc)
+    end
+    local ok, reason = Store.SaveScope(srcIdentity, srcDoc)
+    if not ok then return false, reason end
+    for _, id in ipairs(srcIds or {}) do
+        deleteStoredAlert(srcIdentity, id)
+    end
+    return true
 end
 
 -- Only the old numeric character keys are still documents. A display-name

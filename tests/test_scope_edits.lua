@@ -18,7 +18,10 @@ local function newFakePersistentDB()
         self.data[key] = value
         return true
     end
-    function db:Delete(key) self.data[key] = nil end
+    function db:Delete(key)
+        self.data[key] = nil
+        return true
+    end
     return db
 end
 
@@ -734,6 +737,259 @@ function TestScopeEdits:testCreateDeleteImportMoveAndEnableAreRefusedWhenTheScop
     luaunit.assertEquals(createdResult.kind, "leave")
     luaunit.assertNil(created)
     luaunit.assertEquals(#self.doc.entries, 1)
+end
+
+local function incompressible(count)
+    local parts = {}
+    local x = 123456789
+    for i = 1, count do
+        x = (1103515245 * x + 12345) % 2147483648
+        parts[i] = string.char(65 + (x % 26))
+    end
+    return table.concat(parts)
+end
+
+-- GetNodes is a projection, so the huge text has to go through SetControl.
+local function addEssay(self, graph, text)
+    if self.registry:GetNodeType("fixture.note") == nil then
+        self.registry:RegisterNodeType("fixture.note", {
+            category = "action",
+            pins = { { name = "text", kind = "data", direction = "in", dataType = "string" } },
+            run = function() end,
+        })
+    end
+    local noteId = graph:AddNode("fixture.note")
+    graph:SetControl(noteId, "text", text)
+    return noteId
+end
+
+function TestScopeEdits:splitGlobal()
+    for _, entry in ipairs(Store.Leaves(self.doc)) do
+        luaunit.assertTrue(Store.SaveAlert("global", entry))
+    end
+    luaunit.assertTrue(Store.SaveScope("global", self.doc))
+    local loaded = Store.LoadScope("global")
+    self.doc = loaded
+    self.scopes.global.doc = loaded
+    return loaded
+end
+
+function TestScopeEdits:testDeleteOnASplitScopeDropsTheStoredGraph()
+    local kept = self:seedAlert("Kept", true)
+    local gone = self:seedAlert("Gone", true)
+    self:splitGlobal()
+    local keptBytes = PersistentDB:GetString("scope_global_alert_" .. kept)
+
+    local result = self.edits:Delete("global", gone)
+
+    luaunit.assertEquals(result.kind, "leave")
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_" .. gone))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. kept), keptBytes)
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(#loaded.entries, 1)
+    luaunit.assertEquals(loaded.entries[1].name, "Kept")
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestScopeEdits:testDeletingAGroupOnASplitScopeDropsEveryAlertKey()
+    local outside = self:seedAlert("Outside", true)
+    local firstGraph = LibNodeGraph.NewGraph(self.registry)
+    firstGraph:AddNode("fixture.trigger")
+    local secondGraph = LibNodeGraph.NewGraph(self.registry)
+    secondGraph:AddNode("fixture.trigger")
+    Store.InsertEntry(self.doc, Store.NewGroupEntry(3, "Folder", true, {
+        Store.NewAlertEntry(4, "First", firstGraph, {}, true),
+        Store.NewAlertEntry(5, "Second", secondGraph, {}, false),
+    }))
+    self:splitGlobal()
+    local outsideBytes = PersistentDB:GetString("scope_global_alert_" .. outside)
+
+    local result = self.edits:BulkDelete("global", { 3 })
+
+    luaunit.assertEquals(result.kind, "leave")
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_4"))
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_5"))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. outside), outsideBytes)
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(#loaded.entries, 1)
+    luaunit.assertEquals(loaded.entries[1].name, "Outside")
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestScopeEdits:testMoveOnASplitScopeDropsTheSourceGraph()
+    local id = self:seedAlert("Horn", true)
+    self:splitGlobal()
+    local dest = Store.Empty()
+    local stay = Store.MintId(dest)
+    local stayGraph = LibNodeGraph.NewGraph(self.registry)
+    stayGraph:AddNode("fixture.trigger")
+    Store.InsertEntry(dest, Store.NewAlertEntry(stay, "Stay", stayGraph, {}, true))
+    luaunit.assertTrue(Store.SaveAlert("player_9", dest.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("player_9", dest))
+    local loadedDest = Store.LoadScope("player_9")
+    local stayBytes = PersistentDB:GetString("scope_player_9_alert_" .. stay)
+    self.scopes.player_9 = { doc = loadedDest, key = "player_9", list = {} }
+
+    local result = self.edits:BulkMove("global", "player_9", { id })
+
+    luaunit.assertEquals(result.kind, "leave")
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_" .. id))
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_9_alert_" .. stay), stayBytes)
+    luaunit.assertEquals(Store.LoadScope("global").entries, {})
+    local destination = Store.LoadScope("player_9")
+    luaunit.assertEquals(destination.entries[1].name, "Stay")
+    luaunit.assertEquals(destination.entries[2].name, "Horn")
+    luaunit.assertEquals(destination.entries[2].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestScopeEdits:testATooBigAlertWarnsOnceWhileItStaysOpen()
+    local id, graph = self:seedAlert("Essay", true)
+    self:splitGlobal()
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    local scopeBefore = PersistentDB:GetString("scope_global")
+    local restored = Store.RestoreAll(self.doc, self.registry)
+    graph = restored[1].graph
+    self.edits:NoteSaved("global")
+    local reasons = {}
+    self.edits.onSaveFailed = function(reason) reasons[#reasons + 1] = reason end
+    local noteId = addEssay(self, graph, incompressible(200000))
+
+    self.edits:Autosave("global", id, graph, {})
+    self.edits:Autosave("global", id, graph, {})
+
+    luaunit.assertEquals(reasons, { "size" })
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
+    luaunit.assertEquals(#graph:GetControl(noteId, "text"), 200000)
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(#loaded.entries[1].graph.nodes, 1)
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestScopeEdits:testASuccessfulSaveWarnsAboutSizeAgain()
+    local id, graph = self:seedAlert("Essay", true)
+    self:splitGlobal()
+    local restored = Store.RestoreAll(self.doc, self.registry)
+    graph = restored[1].graph
+    self.edits:NoteSaved("global")
+    local reasons = {}
+    self.edits.onSaveFailed = function(reason) reasons[#reasons + 1] = reason end
+    local noteId = addEssay(self, graph, incompressible(200000))
+    self.edits:Autosave("global", id, graph, {})
+    self.edits:Autosave("global", id, graph, {})
+    graph:SetControl(noteId, "text", "short")
+    self.edits:Autosave("global", id, graph, {})
+    graph:SetControl(noteId, "text", incompressible(200000))
+    self.edits:Autosave("global", id, graph, {})
+
+    luaunit.assertEquals(reasons, { "size", "size" })
+    luaunit.assertEquals(#graph:GetControl(noteId, "text"), 200000)
+    local savedText
+    for _, node in ipairs(Store.LoadScope("global").entries[1].graph.nodes) do
+        if node.type == "fixture.note" then savedText = node.controls.text end
+    end
+    luaunit.assertEquals(savedText, "short")
+end
+
+function TestScopeEdits:testClosingTheAlertShowsTheSizeWarningAgain()
+    local id, graph = self:seedAlert("Essay", true)
+    self:splitGlobal()
+    local restored = Store.RestoreAll(self.doc, self.registry)
+    graph = restored[1].graph
+    self.edits:NoteSaved("global")
+    local reasons = {}
+    self.edits.onSaveFailed = function(reason) reasons[#reasons + 1] = reason end
+    addEssay(self, graph, incompressible(200000))
+    self.edits:Autosave("global", id, graph, {})
+    self.edits:Autosave("global", id, graph, {})
+    self.edits:NoteClosed()
+    self.edits:Autosave("global", id, graph, {})
+
+    luaunit.assertEquals(reasons, { "size", "size" })
+    luaunit.assertNil(PersistentDB:GetString("scope_global_size"))
+end
+
+function TestScopeEdits:testAnEnableThatDoesNotFitWarnsEveryTime()
+    local id = self:seedAlert("Gate", true)
+    self:splitGlobal()
+    local scopeBefore = PersistentDB:GetString("scope_global")
+    local reasons = {}
+    self.edits.onSaveFailed = function(reason) reasons[#reasons + 1] = reason end
+    Store.FindById(self.doc, id).name = incompressible(200000)
+
+    self.edits:ToggleEnabled("global", id)
+    self.edits:ToggleEnabled("global", id)
+
+    luaunit.assertEquals(reasons, { "size", "size" })
+    luaunit.assertEquals(Store.FindById(self.doc, id).enabled, true)
+    luaunit.assertEquals(self.runtime.alerts[1].enabled, true)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
+    luaunit.assertEquals(Store.LoadScope("global").entries[1].name, "Gate")
+    luaunit.assertEquals(Store.LoadScope("global").entries[1].enabled, true)
+end
+
+function TestScopeEdits:testAutosaveLeavesTheOtherAlertBytesAlone()
+    local kept = self:seedAlert("Kept", true)
+    local edited = self:seedAlert("Horn", true)
+    self:splitGlobal()
+    local keptBytes = PersistentDB:GetString("scope_global_alert_" .. kept)
+    Store.FindById(self.doc, kept).graph.nodes[1].controls = { text = "not this alert" }
+    local restored = Store.RestoreAll(self.doc, self.registry)
+    local horn
+    for _, alert in ipairs(restored) do
+        if alert.id == edited then horn = alert.graph end
+    end
+    local nodeId = horn:AddNode("fixture.trigger")
+    self.edits:NoteSaved("global")
+
+    self.edits:Autosave("global", edited, horn, { [nodeId] = { x = 3, y = 4 } })
+
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. kept), keptBytes)
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(loaded.entries[1].name, "Kept")
+    luaunit.assertNil(loaded.entries[1].graph.nodes[1].controls.text)
+    luaunit.assertEquals(loaded.entries[2].name, "Horn")
+    luaunit.assertEquals(#loaded.entries[2].graph.nodes, 2)
+    luaunit.assertEquals(loaded.entries[2].layout[1].x, 3)
+    luaunit.assertEquals(loaded.entries[2].layout[1].y, 4)
+end
+
+function TestScopeEdits:testRenameLeavesTheGraphBytes()
+    local id = self:seedAlert("Horn", true)
+    self:splitGlobal()
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    Store.FindById(self.doc, id).graph.nodes[1].controls = { text = "dirty" }
+
+    local _, ok = self.edits:Rename("global", id, "Renamed")
+
+    luaunit.assertEquals(ok, true)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(loaded.entries[1].name, "Renamed")
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertNil(loaded.entries[1].graph.nodes[1].controls.text)
+end
+
+function TestScopeEdits:testOpeningAnAlertAndClosingItWritesNothing()
+    local id = self:seedAlert("Horn", true)
+    self:splitGlobal()
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    local scopeBefore = PersistentDB:GetString("scope_global")
+    local restored = Store.RestoreAll(self.doc, self.registry)
+    local writes = 0
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes = writes + 1
+        return inner(self, key, value)
+    end
+
+    self.edits:NoteSaved("global")
+    self.edits:Autosave("global", id, restored[1].graph, restored[1].layout)
+    self.edits:NoteClosed()
+
+    luaunit.assertEquals(writes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
 end
 
 return TestScopeEdits

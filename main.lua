@@ -234,7 +234,7 @@ runtime:SetPersistence({
         if doc == nil or not Store.SetEnabled(doc, id, enabled) then
             return false
         end
-        local ok, reason = Store.PersistScope(key, doc)
+        local ok, reason = Store.SaveTree(key, doc)
         if ok ~= true and reason == "size" and reportFailedSave ~= nil then
             reportFailedSave(reason)
         end
@@ -262,7 +262,7 @@ end
 runtime.infobox:SetPersistence({
     SaveAnchor = function(x, y)
         Store.SetInfoBoxAnchor(document, x, y)
-        local ok, reason = Store.PersistScope("global", document)
+        local ok, reason = Store.SaveTree("global", document)
         if ok ~= true and reportFailedSave ~= nil then
             reportFailedSave(reason)
         end
@@ -367,6 +367,7 @@ end
 
 local function navBack()
     if persistNow ~= nil then pcall(persistNow) end -- flush before unbinding
+    if edits ~= nil then edits:NoteClosed() end
     editor:Unbind()
     boundScope = nil
     if mux ~= nil then mux:Pop() end

@@ -28,6 +28,7 @@ local PresetCopy = require("src/preset_copy")
 ---@field lookup (fun(scopeKey: string): Watchdog.Bucket|nil, string|nil, Watchdog.RestoredAlert[]|nil)|nil
 ---@field onSaveFailed fun()|nil
 ---@field _savedEncode string|nil
+---@field _sizeWarned boolean
 local ScopeEdits = {}
 ScopeEdits.__index = ScopeEdits
 
@@ -98,6 +99,9 @@ function ScopeEdits.new(deps)
         lookup = deps.bucket,
         onSaveFailed = deps.onSaveFailed,
         _savedEncode = nil,
+        -- The size dialog for the open alert. Not stored. Closing the alert
+        -- or a successful save clears it, so the next oversize edit warns again.
+        _sizeWarned = false,
     }, ScopeEdits)
 end
 
@@ -111,11 +115,13 @@ function ScopeEdits:_bucket(scopeKey)
 end
 
 -- Enable does not use this. A refused write tells the player; the bytes stay as they were.
+-- A scope that already has its key writes the tree only. One still on the legacy
+-- document stores every alert first, then the tree.
 ---@param key string
 ---@param doc Watchdog.Bucket
 ---@return boolean
 function ScopeEdits:_save(key, doc)
-    local ok, reason = self.store.PersistScope(key, doc)
+    local ok, reason = self.store.SaveTree(key, doc)
     if ok ~= true and self.onSaveFailed ~= nil then
         self.onSaveFailed(reason)
     end
@@ -169,9 +175,9 @@ function ScopeEdits:ToggleEnabled(scopeKey, id)
     if entry == nil then return leave() end
     local nextEnabled = not (entry.enabled ~= false)
     self.store.SetEnabled(doc, id, nextEnabled)
-    -- A size refusal is the same dialog as any other oversized save. Any other
+    -- A tree that does not fit uses the size dialog, every time. Any other
     -- failure stays the enable log line, and the new flag stays for the session.
-    local ok, reason = self.store.PersistScope(key, doc)
+    local ok, reason = self.store.SaveTree(key, doc)
     if ok ~= true and reason == "size" then
         self:_report(reason)
     end
@@ -244,7 +250,9 @@ function ScopeEdits:Delete(scopeKey, id, open)
     local closing = self:_closing(entry, key, open)
     if closing then self:_flushOpen(open) end
     self.store.DeleteById(doc, id)
-    self:_save(key, doc)
+    -- Tree first. The alert keys are deleted only after that write succeeds.
+    local saved, reason = self.store.RemoveAlerts(key, doc, alertIds)
+    if not saved then self:_report(reason) end
     for _, alertId in ipairs(alertIds) do
         self.runtime:ReleaseAlertVisuals(alertId, key)
         self.runtime:RemoveAlert(alertId, key)
@@ -291,14 +299,21 @@ end
 
 -- Records the Bucket's encoded text when the Editor opens, so a later autosave
 -- can tell an untouched graph from a real edit. One open Alert at a time.
+-- Opening starts the size warning over. Nothing about that warning is stored.
 ---@param scopeKey string
 function ScopeEdits:NoteSaved(scopeKey)
+    self._sizeWarned = false
     local doc = self:_bucket(scopeKey)
     if doc == nil then
         self._savedEncode = nil
         return
     end
     self._savedEncode = self.store.Encode(doc)
+end
+
+-- Closing the alert drops the size warning. The next open can show it again.
+function ScopeEdits:NoteClosed()
+    self._sizeWarned = false
 end
 
 -- Writes the open Alert's graph and Layout into its Bucket, and saves only when
@@ -315,10 +330,23 @@ function ScopeEdits:Autosave(scopeKey, alertId, graph, layout)
     if doc == nil or key == nil then return leave() end
     self.store.UpdateAlertGraph(doc, alertId, graph, layout)
     local encoded = self.store.Encode(doc)
-    if encoded ~= nil and encoded ~= self._savedEncode then
-        if self:_save(key, doc) then
-            self._savedEncode = encoded
+    if encoded == nil or encoded == self._savedEncode then
+        -- Back to the last saved graph. The next oversize edit warns again.
+        self._sizeWarned = false
+        return leave()
+    end
+    local entry = self.store.FindById(doc, alertId)
+    local ok, reason = self.store.SaveEditedAlert(key, doc, entry)
+    if ok then
+        self._savedEncode = encoded
+        self._sizeWarned = false
+    elseif reason == "size" then
+        if not self._sizeWarned then
+            self._sizeWarned = true
+            self:_report(reason)
         end
+    else
+        self:_report(reason)
     end
     return leave()
 end
@@ -386,6 +414,7 @@ function ScopeEdits:BulkDelete(scopeKey, ids, open)
     if doc == nil or key == nil or ids == nil then return leave() end
     if self.store.ScopeStorage(key) == "unreadable" then return leave() end
     local closing = false
+    local removed = {}
     for _, id in ipairs(ids) do
         local entry = self.store.FindById(doc, id)
         if entry ~= nil then
@@ -397,13 +426,15 @@ function ScopeEdits:BulkDelete(scopeKey, ids, open)
             end
             self.store.DeleteById(doc, id)
             for _, alertId in ipairs(alertIds) do
+                removed[#removed + 1] = alertId
                 self.runtime:ReleaseAlertVisuals(alertId, key)
                 self.runtime:RemoveAlert(alertId, key)
             end
             if list ~= nil then purgeAlertList(list, alertIds) end
         end
     end
-    self:_save(key, doc)
+    local saved, reason = self.store.RemoveAlerts(key, doc, removed)
+    if not saved then self:_report(reason) end
     if closing then return { kind = "close" } end
     return leave()
 end
@@ -436,6 +467,9 @@ function ScopeEdits:BulkMove(scopeKey, destScopeKey, ids, open)
         return leave()
     end
     local closing = false
+    local movedAny = false
+    local sourceIds = {}
+    local destEntries = {}
     for _, id in ipairs(ids) do
         local before = self.store.FindById(srcDoc, id)
         if before ~= nil then
@@ -458,6 +492,10 @@ function ScopeEdits:BulkMove(scopeKey, destScopeKey, ids, open)
             end
             local moved = self.store.MoveEntryToBucket(srcDoc, destDoc, id)
             if moved ~= nil then
+                movedAny = true
+                for _, alertId in ipairs(alertIds) do
+                    sourceIds[#sourceIds + 1] = alertId
+                end
                 if srcList ~= nil then purgeAlertList(srcList, alertIds) end
                 local leaves = {}
                 local function collectLeaves(entry)
@@ -468,6 +506,9 @@ function ScopeEdits:BulkMove(scopeKey, destScopeKey, ids, open)
                     end
                 end
                 collectLeaves(moved)
+                for _, leaf in ipairs(leaves) do
+                    destEntries[#destEntries + 1] = leaf
+                end
                 for i, leaf in ipairs(leaves) do
                     local snap = snapshots[i]
                     if snap ~= nil then
@@ -487,8 +528,14 @@ function ScopeEdits:BulkMove(scopeKey, destScopeKey, ids, open)
             end
         end
     end
-    self:_save(srcKey, srcDoc)
-    self:_save(destKey, destDoc)
+    -- Destination keys, then the tree that names them, then the source tree,
+    -- then the source keys. A failed write does not delete a graph the source
+    -- tree still names.
+    if movedAny then
+        local saved, reason = self.store.TransferAlerts(
+            srcKey, srcDoc, destKey, destDoc, destEntries, sourceIds)
+        if not saved then self:_report(reason) end
+    end
     if closing then return { kind = "close" } end
     return leave()
 end

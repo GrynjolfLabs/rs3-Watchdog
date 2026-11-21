@@ -35,7 +35,10 @@ local function newFakePersistentDB()
         self.data[key] = value
         return true
     end
-    function db:Delete(key) self.data[key] = nil end
+    function db:Delete(key)
+        self.data[key] = nil
+        return true
+    end
     return db
 end
 
@@ -1917,6 +1920,511 @@ function TestStore:testAScopeTreeThatDoesNotFitIsRefusedEveryTime()
     luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
     luaunit.assertEquals(PersistentDB:GetString("global"), legacy)
     luaunit.assertEquals(#loaded.entries[1].name, 200000)
+end
+
+-- An edit removes an alert from the tree before its key goes. A crash between
+-- those two writes leaves an orphan, which load ignores. It does not leave a
+-- tree row whose graph was already deleted.
+
+function TestStore:testRemovingAnAlertWritesTheTreeBeforeDeletingItsKey()
+    local doc = Store.Empty()
+    local kept = seedAlert(self, doc, "Kept", true)
+    local gone = seedAlert(self, doc, "Gone", true)
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, kept)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, gone)))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local keptBytes = PersistentDB:GetString("scope_global_alert_" .. kept)
+    local order = {}
+    local innerSet = PersistentDB.SetString
+    local innerDelete = PersistentDB.Delete
+    function PersistentDB:SetString(key, value)
+        order[#order + 1] = "set:" .. key
+        return innerSet(self, key, value)
+    end
+    function PersistentDB:Delete(key)
+        order[#order + 1] = "del:" .. key
+        local scope = decodeToken(self.data.scope_global)
+        luaunit.assertEquals(#scope.entries, 1)
+        luaunit.assertEquals(scope.entries[1].id, kept)
+        return innerDelete(self, key)
+    end
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertNotNil(Store.DeleteById(loaded, gone))
+    luaunit.assertTrue(Store.RemoveAlerts("global", loaded, { gone }))
+
+    luaunit.assertEquals(order, {
+        "set:scope_global",
+        "del:scope_global_alert_" .. gone,
+    })
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_" .. gone))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. kept), keptBytes)
+    luaunit.assertNil(PersistentDB:GetString("global"))
+    local again = Store.LoadScope("global")
+    luaunit.assertEquals(#again.entries, 1)
+    luaunit.assertEquals(again.entries[1].name, "Kept")
+    luaunit.assertEquals(again.entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestStore:testAFailedTreeWriteLeavesTheAlertKey()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local scopeBefore = PersistentDB:GetString("scope_global")
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    local deletes = 0
+    function PersistentDB:SetString()
+        return false
+    end
+    function PersistentDB:Delete()
+        deletes = deletes + 1
+        return true
+    end
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertNotNil(Store.DeleteById(loaded, id))
+    local ok, reason = Store.RemoveAlerts("global", loaded, { id })
+
+    luaunit.assertFalse(ok)
+    luaunit.assertEquals(reason, "failed")
+    luaunit.assertEquals(deletes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    local again = Store.LoadScope("global")
+    luaunit.assertEquals(again.entries[1].name, "Horn")
+    luaunit.assertEquals(again.entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestStore:testAFailedAlertKeyDeleteLeavesAnOrphanAndDropsTheRow()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    local lines = {}
+    log = function(message) lines[#lines + 1] = message end
+    function PersistentDB:Delete()
+        return false
+    end
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertNotNil(Store.DeleteById(loaded, id))
+    local ok = Store.RemoveAlerts("global", loaded, { id })
+    log = nil
+
+    luaunit.assertTrue(ok)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    luaunit.assertEquals(Store.LoadScope("global").entries, {})
+    luaunit.assertEquals(#lines, 1)
+    luaunit.assertStrContains(lines[1], "scope_global_alert_" .. id)
+end
+
+function TestStore:testANilOrThrownDeleteLeavesTheAlertKey()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertNotNil(Store.DeleteById(loaded, id))
+    function PersistentDB:Delete()
+        return nil
+    end
+    luaunit.assertTrue(Store.RemoveAlerts("global", loaded, { id }))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+
+    function PersistentDB:Delete()
+        error("rejected")
+    end
+    luaunit.assertTrue(Store.RemoveAlerts("global", loaded, { id }))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    luaunit.assertEquals(Store.LoadScope("global").entries, {})
+end
+
+function TestStore:testRemovingAGroupDeletesEveryAlertKeyInIt()
+    local doc = Store.Empty()
+    local outside = seedAlert(self, doc, "Outside", true)
+    local groupId = Store.MintId(doc)
+    Store.InsertEntry(doc, Store.NewGroupEntry(groupId, "Folder", true, {}))
+    local first = seedAlert(self, doc, "First", true, groupId)
+    local second = seedAlert(self, doc, "Second", false, groupId)
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, outside)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, first)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, second)))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local outsideBytes = PersistentDB:GetString("scope_global_alert_" .. outside)
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertNotNil(Store.DeleteById(loaded, groupId))
+    luaunit.assertTrue(Store.RemoveAlerts("global", loaded, { first, second }))
+
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_" .. first))
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_" .. second))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. outside), outsideBytes)
+    local again = Store.LoadScope("global")
+    luaunit.assertEquals(#again.entries, 1)
+    luaunit.assertEquals(again.entries[1].name, "Outside")
+    luaunit.assertEquals(again.entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+-- Destination key, then the tree that names it, then the source tree, then
+-- the source key. Stopping early can leave an orphan or a copy in both
+-- scopes. It cannot delete a graph the source tree still names.
+
+function TestStore:testAMoveWritesTheDestinationBeforeDeletingTheSource()
+    local src = Store.Empty()
+    local kept = seedAlert(self, src, "Kept", true)
+    local moved = seedAlert(self, src, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(src, kept)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(src, moved)))
+    luaunit.assertTrue(Store.SaveScope("global", src))
+    local dest = Store.Empty()
+    local staying = seedAlert(self, dest, "Stay", true)
+    luaunit.assertTrue(Store.SaveAlert("player_42", dest.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("player_42", dest))
+    local keptBytes = PersistentDB:GetString("scope_global_alert_" .. kept)
+    local stayBytes = PersistentDB:GetString("scope_player_42_alert_" .. staying)
+
+    local order = {}
+    local innerSet = PersistentDB.SetString
+    local innerDelete = PersistentDB.Delete
+    function PersistentDB:SetString(key, value)
+        order[#order + 1] = "set:" .. key
+        return innerSet(self, key, value)
+    end
+    function PersistentDB:Delete(key)
+        order[#order + 1] = "del:" .. key
+        local source = decodeToken(self.data.scope_global)
+        luaunit.assertEquals(#source.entries, 1)
+        luaunit.assertEquals(source.entries[1].id, kept)
+        local destination = decodeToken(self.data.scope_player_42)
+        luaunit.assertEquals(destination.entries[1].name, "Stay")
+        luaunit.assertEquals(destination.entries[2].id, moved)
+        luaunit.assertNotNil(self.data["scope_player_42_alert_" .. moved])
+        return innerDelete(self, key)
+    end
+
+    local loadedSrc = Store.LoadScope("global")
+    local loadedDest = Store.LoadScope("player_42")
+    local entry = Store.MoveEntryToBucket(loadedSrc, loadedDest, moved)
+    luaunit.assertTrue(Store.TransferAlerts(
+        "global", loadedSrc, "player_42", loadedDest, { entry }, { moved }))
+
+    luaunit.assertEquals(order, {
+        "set:scope_player_42_alert_" .. moved,
+        "set:scope_player_42",
+        "set:scope_global",
+        "del:scope_global_alert_" .. moved,
+    })
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_" .. moved))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. kept), keptBytes)
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_42_alert_" .. staying), stayBytes)
+    luaunit.assertNil(PersistentDB:GetString("global"))
+    luaunit.assertNil(PersistentDB:GetString("player_42"))
+    local source = Store.LoadScope("global")
+    luaunit.assertEquals(#source.entries, 1)
+    luaunit.assertEquals(source.entries[1].name, "Kept")
+    local destination = Store.LoadScope("player_42")
+    luaunit.assertEquals(destination.entries[1].name, "Stay")
+    luaunit.assertEquals(destination.entries[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(destination.entries[2].name, "Horn")
+    luaunit.assertEquals(destination.entries[2].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestStore:testAMoveThatCannotStoreTheGraphLeavesTheSourceUntouched()
+    local src = Store.Empty()
+    local moved = seedAlert(self, src, "Essay", true)
+    luaunit.assertTrue(Store.SaveAlert("global", src.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", src))
+    local dest = Store.Empty()
+    seedAlert(self, dest, "Stay", true)
+    luaunit.assertTrue(Store.SaveAlert("player_42", dest.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("player_42", dest))
+    local sourceScope = PersistentDB:GetString("scope_global")
+    local sourceAlert = PersistentDB:GetString("scope_global_alert_" .. moved)
+    local destScope = PersistentDB:GetString("scope_player_42")
+    local stayAlert = PersistentDB:GetString("scope_player_42_alert_1")
+    local deletes = 0
+    function PersistentDB:Delete()
+        deletes = deletes + 1
+        return true
+    end
+
+    local loadedSrc = Store.LoadScope("global")
+    local loadedDest = Store.LoadScope("player_42")
+    local entry = Store.MoveEntryToBucket(loadedSrc, loadedDest, moved)
+    entry.graph.nodes[1].controls = { text = incompressible(200000) }
+    local ok, reason, name = Store.TransferAlerts(
+        "global", loadedSrc, "player_42", loadedDest, { entry }, { moved })
+
+    luaunit.assertFalse(ok)
+    luaunit.assertEquals(reason, "size")
+    luaunit.assertEquals(name, "Essay")
+    luaunit.assertEquals(deletes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), sourceScope)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. moved), sourceAlert)
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_42"), destScope)
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_42_alert_1"), stayAlert)
+    luaunit.assertNil(PersistentDB:GetString("scope_player_42_alert_" .. entry.id))
+    luaunit.assertEquals(#entry.graph.nodes[1].controls.text, 200000)
+    luaunit.assertEquals(Store.LoadScope("global").entries[1].name, "Essay")
+    luaunit.assertEquals(Store.LoadScope("player_42").entries[1].name, "Stay")
+end
+
+function TestStore:testAFailedDestinationTreeLeavesTheSourceGraphInPlace()
+    local src = Store.Empty()
+    local moved = seedAlert(self, src, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", src.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", src))
+    local dest = Store.Empty()
+    luaunit.assertTrue(Store.SaveScope("player_42", dest))
+    local sourceScope = PersistentDB:GetString("scope_global")
+    local sourceAlert = PersistentDB:GetString("scope_global_alert_" .. moved)
+    local destScope = PersistentDB:GetString("scope_player_42")
+    local deletes = 0
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        if key == "scope_player_42" then return false end
+        return inner(self, key, value)
+    end
+    function PersistentDB:Delete()
+        deletes = deletes + 1
+        return true
+    end
+
+    local loadedSrc = Store.LoadScope("global")
+    local loadedDest = Store.LoadScope("player_42")
+    local entry = Store.MoveEntryToBucket(loadedSrc, loadedDest, moved)
+    local ok, reason = Store.TransferAlerts(
+        "global", loadedSrc, "player_42", loadedDest, { entry }, { moved })
+
+    luaunit.assertFalse(ok)
+    luaunit.assertEquals(reason, "failed")
+    luaunit.assertEquals(deletes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), sourceScope)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. moved), sourceAlert)
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_42"), destScope)
+    luaunit.assertNotNil(PersistentDB:GetString("scope_player_42_alert_" .. moved))
+    luaunit.assertEquals(Store.LoadScope("global").entries[1].name, "Horn")
+    luaunit.assertEquals(Store.LoadScope("player_42").entries, {})
+end
+
+function TestStore:testAFailedSourceTreeLeavesTheAlertInBothScopes()
+    local src = Store.Empty()
+    local moved = seedAlert(self, src, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", src.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", src))
+    local dest = Store.Empty()
+    luaunit.assertTrue(Store.SaveScope("player_42", dest))
+    local sourceScope = PersistentDB:GetString("scope_global")
+    local sourceAlert = PersistentDB:GetString("scope_global_alert_" .. moved)
+    local deletes = 0
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        if key == "scope_global" then return false end
+        return inner(self, key, value)
+    end
+    function PersistentDB:Delete()
+        deletes = deletes + 1
+        return true
+    end
+
+    local loadedSrc = Store.LoadScope("global")
+    local loadedDest = Store.LoadScope("player_42")
+    local entry = Store.MoveEntryToBucket(loadedSrc, loadedDest, moved)
+    local ok, reason = Store.TransferAlerts(
+        "global", loadedSrc, "player_42", loadedDest, { entry }, { moved })
+
+    luaunit.assertFalse(ok)
+    luaunit.assertEquals(reason, "failed")
+    luaunit.assertEquals(deletes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), sourceScope)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. moved), sourceAlert)
+    luaunit.assertEquals(Store.LoadScope("global").entries[1].name, "Horn")
+    luaunit.assertEquals(Store.LoadScope("player_42").entries[1].name, "Horn")
+    luaunit.assertEquals(Store.LoadScope("player_42").entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestStore:testAFailedSourceDeleteLeavesAnOrphanAndKeepsTheDestination()
+    local src = Store.Empty()
+    local moved = seedAlert(self, src, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", src.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", src))
+    local dest = Store.Empty()
+    luaunit.assertTrue(Store.SaveScope("player_42", dest))
+    local sourceAlert = PersistentDB:GetString("scope_global_alert_" .. moved)
+    function PersistentDB:Delete()
+        return false
+    end
+
+    local loadedSrc = Store.LoadScope("global")
+    local loadedDest = Store.LoadScope("player_42")
+    local entry = Store.MoveEntryToBucket(loadedSrc, loadedDest, moved)
+    local ok = Store.TransferAlerts(
+        "global", loadedSrc, "player_42", loadedDest, { entry }, { moved })
+
+    luaunit.assertTrue(ok)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. moved), sourceAlert)
+    luaunit.assertEquals(Store.LoadScope("global").entries, {})
+    luaunit.assertEquals(Store.LoadScope("player_42").entries[1].name, "Horn")
+    luaunit.assertEquals(Store.LoadScope("player_42").entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestStore:testAMoveThatRemintsDeletesTheOldIdAndKeepsTheDestinationId()
+    local src = Store.Empty()
+    seedAlert(self, src, "Horn", true)
+    src.entries[1].graph.nodes[1].name = "from global"
+    luaunit.assertTrue(Store.SaveAlert("global", src.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", src))
+    local dest = Store.Empty()
+    seedAlert(self, dest, "Stay", true)
+    luaunit.assertTrue(Store.SaveAlert("player_42", dest.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("player_42", dest))
+    local stayBytes = PersistentDB:GetString("scope_player_42_alert_1")
+
+    local loadedSrc = Store.LoadScope("global")
+    local loadedDest = Store.LoadScope("player_42")
+    local entry = Store.MoveEntryToBucket(loadedSrc, loadedDest, 1)
+    luaunit.assertEquals(entry.id, 2)
+    luaunit.assertTrue(Store.TransferAlerts(
+        "global", loadedSrc, "player_42", loadedDest, { entry }, { 1 }))
+
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_1"))
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_42_alert_1"), stayBytes)
+    luaunit.assertEquals(decodeToken(PersistentDB:GetString("scope_player_42_alert_2")).graph.nodes[1].name, "from global")
+    luaunit.assertEquals(Store.LoadScope("global").entries, {})
+    local destination = Store.LoadScope("player_42")
+    luaunit.assertEquals(destination.entries[1].name, "Stay")
+    luaunit.assertNil(destination.entries[1].graph.nodes[1].name)
+    luaunit.assertEquals(destination.entries[2].id, 2)
+    luaunit.assertEquals(destination.entries[2].graph.nodes[1].name, "from global")
+end
+
+-- A fresh PersistentDB drops the last-token memory. An unchanged graph would
+-- still be written, so a whole-bucket save shows up as extra keys.
+local function forgetTokenMemory()
+    local data = PersistentDB.data
+    PersistentDB = newFakePersistentDB()
+    PersistentDB.data = data
+end
+
+function TestStore:testAnEditedAlertOnASplitScopeWritesOnlyThatKey()
+    local doc = Store.Empty()
+    local kept = seedAlert(self, doc, "Kept", true)
+    local edited = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, kept)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, edited)))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local keptBytes = PersistentDB:GetString("scope_global_alert_" .. kept)
+    local scopeBytes = PersistentDB:GetString("scope_global")
+    forgetTokenMemory()
+    doc.entries[2].graph.nodes[1].controls = { text = "edited" }
+    local writes = {}
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes[key] = (writes[key] or 0) + 1
+        return inner(self, key, value)
+    end
+
+    luaunit.assertTrue(Store.SaveEditedAlert("global", doc, doc.entries[2]))
+
+    luaunit.assertEquals(writes["scope_global_alert_" .. edited], 1)
+    luaunit.assertNil(writes["scope_global_alert_" .. kept])
+    luaunit.assertNil(writes.scope_global)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. kept), keptBytes)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBytes)
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(loaded.entries[1].name, "Kept")
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(loaded.entries[2].graph.nodes[1].controls.text, "edited")
+end
+
+function TestStore:testSavingTheAlertThatWasJustReadWritesNothing()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    local scopeBefore = PersistentDB:GetString("scope_global")
+    local loaded = Store.LoadScope("global")
+    local writes = 0
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes = writes + 1
+        return inner(self, key, value)
+    end
+
+    luaunit.assertTrue(Store.SaveEditedAlert("global", loaded, loaded.entries[1]))
+
+    luaunit.assertEquals(writes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
+end
+
+function TestStore:testAnEditWhileTheNewScopeKeyIsAbsentStoresEveryAlert()
+    local doc = Store.Empty()
+    local kept = seedAlert(self, doc, "Kept", true)
+    local edited = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveTo("global", doc))
+    local legacy = PersistentDB:GetString("global")
+    local loaded = Store.LoadScope("global")
+    loaded.entries[2].graph.nodes[1].controls = { text = "edited" }
+
+    luaunit.assertTrue(Store.SaveEditedAlert("global", loaded, loaded.entries[2]))
+
+    luaunit.assertEquals(PersistentDB:GetString("global"), legacy)
+    luaunit.assertNotNil(PersistentDB:GetString("scope_global_alert_" .. kept))
+    luaunit.assertNotNil(PersistentDB:GetString("scope_global_alert_" .. edited))
+    local again = Store.LoadScope("global")
+    luaunit.assertEquals(again.entries[1].name, "Kept")
+    luaunit.assertEquals(again.entries[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(again.entries[2].graph.nodes[1].controls.text, "edited")
+end
+
+function TestStore:testMovingTheInfoboxWritesOnlyTheGlobalTree()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    forgetTokenMemory()
+    Store.SetInfoBoxAnchor(doc, 8, 9)
+    local writes = {}
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes[key] = (writes[key] or 0) + 1
+        return inner(self, key, value)
+    end
+
+    luaunit.assertTrue(Store.SaveTree("global", doc))
+
+    luaunit.assertEquals(writes.scope_global, 1)
+    luaunit.assertNil(writes["scope_global_alert_" .. id])
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    luaunit.assertNil(PersistentDB:GetString("global"))
+    local loaded = Store.LoadScope("global")
+    local x, y = Store.GetInfoBoxAnchor(loaded)
+    luaunit.assertEquals({ x, y }, { 8, 9 })
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestStore:testATreeEditWhileTheNewScopeKeyIsAbsentStoresEveryAlert()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "Horn", true)
+    luaunit.assertTrue(Store.SaveTo("global", doc))
+    local legacy = PersistentDB:GetString("global")
+    local loaded = Store.LoadScope("global")
+    loaded.entries[1].name = "Renamed"
+
+    luaunit.assertTrue(Store.SaveTree("global", loaded))
+
+    luaunit.assertEquals(PersistentDB:GetString("global"), legacy)
+    luaunit.assertNotNil(PersistentDB:GetString("scope_global_alert_" .. id))
+    local again = Store.LoadScope("global")
+    luaunit.assertEquals(again.entries[1].name, "Renamed")
+    luaunit.assertEquals(again.entries[1].graph.nodes[1].type, "fixture.trigger")
 end
 
 return TestStore
