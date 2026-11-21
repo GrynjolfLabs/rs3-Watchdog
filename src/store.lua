@@ -3,10 +3,11 @@
 -- One Bucket per scope: `{ version, entries, infoboxAnchor }` under an un-prefixed key
 -- (`global` or `player_<tracking id>` - PersistentDB is already plugin-scoped).
 --
--- A scope that has already moved to its own key keeps the tree at `scope_global` or
--- `scope_player_<tracking id>` and each alert graph at `..._alert_<id>`. Those values
--- are WD1 tokens. Callers still pass the scope identity. This module maps it to the
--- stored name. A scope with no new key still uses the un-prefixed document.
+-- A scope that has moved keeps the tree at `scope_global` or `scope_player_<tracking id>`
+-- and each alert graph at `..._alert_<id>`. Those values are WD1 tokens. Callers still
+-- pass the scope identity. This module maps it to the stored name. While the new key is
+-- absent, load still reads the un-prefixed document. Saves write the new keys and leave
+-- that document where it is, so a later edit cannot copy a deleted alert back.
 --
 -- `id` is identity: every op keys on `id`, never `name` (display text, not unique). Alerts
 -- carry Serialize `graph` + `layout`; groups carry `children`. Layout is an array of
@@ -1019,6 +1020,168 @@ function Store.LoadScope(identity)
     end
     collectUnread(payload.entries)
     return payload, unread
+end
+
+-- The new key is absent, so this scope still lives on the legacy document.
+-- An unreadable new key is not absent: nothing here may replace it.
+---@param identity string
+---@return boolean
+local function newScopeAbsent(identity)
+    local key = scopeStorageKey(identity)
+    if key == nil or PersistentDB == nil or scopeIsFrozen(key) then return false end
+    local text
+    local got = pcall(function() text = PersistentDB:GetString(key) end)
+    if not got then return false end
+    return type(text) ~= "string" or text == ""
+end
+
+-- Alert tokens first. The scope key is written only after every one of them
+-- is stored, so a later load never lists an alert whose graph was not written.
+-- The legacy key is not written or deleted. It stays the pre-migration snapshot.
+---@param identity string
+---@return { identity: string, reason: "size"|"failed", name: string|nil }|nil
+local function migrateIdentity(identity)
+    if not legacyIdentity(identity) or not newScopeAbsent(identity) then return nil end
+    local text
+    local got = pcall(function() text = PersistentDB:GetString(identity) end)
+    if not got or type(text) ~= "string" or text == "" then return nil end
+    -- Bytes that do not decode are not an empty tree. Creating the new key
+    -- would hide them, and the next startup would not try again.
+    local c = codec()
+    local decodedOk, decoded = false, nil
+    if c ~= nil then
+        decodedOk, decoded = pcall(function() return c.decode(text) end)
+    end
+    if not decodedOk or type(decoded) ~= "table" then
+        if log ~= nil then
+            log("Watchdog: saved bucket '" .. identity .. "' unreadable, left on disk - " .. tostring(decoded))
+        end
+        return nil
+    end
+    local doc = Store.LoadKey(identity)
+    local ok, reason, name = Store.PersistScope(identity, doc)
+    if not ok then
+        return { identity = identity, reason = reason or "failed", name = name }
+    end
+    return nil
+end
+
+-- A non-empty legacy value that does not decode must not gain a new key.
+-- An empty in-memory tree with no legacy document and no anchor is not a
+-- save: writing one would make the next startup skip migration.
+---@param identity string
+---@param doc Watchdog.Bucket
+---@return boolean blocked
+---@return boolean inventing
+local function emptyWriteGuard(identity, doc)
+    if not newScopeAbsent(identity) or not legacyIdentity(identity) then
+        return false, false
+    end
+    local text
+    local got = pcall(function() text = PersistentDB:GetString(identity) end)
+    if not got then return true, false end
+    if type(text) ~= "string" or text == "" then
+        local anchor = type(doc.infoboxAnchor) == "table"
+        local hasEntries = type(doc.entries) == "table" and #doc.entries > 0
+        return false, not anchor and not hasEntries
+    end
+    local c = codec()
+    local decodedOk, decoded = false, nil
+    if c ~= nil then
+        decodedOk, decoded = pcall(function() return c.decode(text) end)
+    end
+    if not decodedOk or type(decoded) ~= "table" then
+        return true, false
+    end
+    return false, false
+end
+
+-- Writes every alert key, then the scope key. While the scope key is absent
+-- this is the migration: one alert that does not fit leaves that key absent
+-- and does not touch the legacy document. A later save of a scope that already
+-- has its key uses the same writes and still does not touch the legacy key.
+---@param identity string
+---@param doc Watchdog.Bucket
+---@return boolean
+---@return "size"|"failed"|nil reason
+---@return string|nil name
+function Store.PersistScope(identity, doc)
+    if type(doc) ~= "table" then return false, "failed" end
+    local key = scopeStorageKey(identity)
+    if key == nil or scopeIsFrozen(key) then return false, "failed" end
+    local blocked, inventing = emptyWriteGuard(identity, doc)
+    if blocked then return false, "failed" end
+    if inventing then return true end
+    for _, entry in ipairs(Store.Leaves(doc)) do
+        local ok, reason = Store.SaveAlert(identity, entry)
+        if not ok then
+            return false, reason or "failed", entry.name
+        end
+    end
+    local ok, reason = Store.SaveScope(identity, doc)
+    if not ok then
+        return false, reason or "failed"
+    end
+    return true
+end
+
+-- Nil means the list itself failed. Callers still migrate `global`, and the
+-- current character once the bucket loader knows the tracking id.
+---@return string[]|nil
+local function listStorageKeys()
+    if PersistentDB == nil or type(PersistentDB.IterateEntries) ~= "function" then
+        return nil
+    end
+    local keys = {}
+    local ok = pcall(function()
+        PersistentDB:IterateEntries(function(key)
+            if type(key) == "string" then
+                keys[#keys + 1] = key
+            end
+        end)
+    end)
+    if not ok then return nil end
+    return keys
+end
+
+-- Keys are copied out of IterateEntries before any migration write. A failed
+-- list still migrates `global`. Numeric character keys are migrated from that
+-- copy. A display-name `player_*` key is not read. Tracking permission is not
+-- consulted: the id is already in the key.
+---@return { identity: string, reason: "size"|"failed", name: string|nil }[]
+function Store.MigrateListed()
+    local listed = listStorageKeys()
+    local failures = {}
+    local function take(identity)
+        local fail = migrateIdentity(identity)
+        if fail ~= nil then
+            failures[#failures + 1] = fail
+            -- This character is not armed yet. The load that arms it shows
+            -- the dialog. Until then the failure is only a log line, and the
+            -- next key in the list still migrates.
+            if log ~= nil then
+                log("Watchdog: could not migrate scope '" .. tostring(identity) .. "'")
+            end
+        end
+    end
+    take("global")
+    if listed ~= nil then
+        for _, key in ipairs(listed) do
+            if key:match("^player_%d+$") ~= nil then
+                take(key)
+            end
+        end
+    end
+    return failures
+end
+
+-- The bucket loader calls this once it knows the tracking id, and it finishes
+-- before that scope is armed. A character the startup list never saw still
+-- moves here. An identity that already has its new key is left alone.
+---@param identity string
+---@return { identity: string, reason: "size"|"failed", name: string|nil }|nil
+function Store.MigrateScope(identity)
+    return migrateIdentity(identity)
 end
 
 return Store

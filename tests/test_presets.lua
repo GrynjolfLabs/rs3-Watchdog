@@ -15,6 +15,7 @@ LibNodeGraph = {
 
 local Store = require("src/store")
 local Presets = require("src/presets")
+local Compress = require("src/compress")
 local Registry = require("registry")
 local Controls = require("src/ui/controls")
 -- Node files register their own tags. Eligibility must follow that registration.
@@ -28,7 +29,10 @@ local function newFakePersistentDB()
         self.data[key] = value
         return true
     end
-    function db:Delete(key) self.data[key] = nil end
+    function db:Delete(key)
+        self.data[key] = nil
+        return true
+    end
     return db
 end
 
@@ -101,10 +105,12 @@ function TestPresets:setUp()
     })
     PersistentDB = newFakePersistentDB()
     Presets.SetSaveFailed(nil)
+    Presets.SetLoadFailed(nil)
 end
 
 function TestPresets:tearDown()
     Presets.SetSaveFailed(nil)
+    Presets.SetLoadFailed(nil)
     PersistentDB = nil
 end
 
@@ -830,7 +836,10 @@ function TestPresets:testSetStringFalseLeavesThePreviousPresetBytes()
     graph:AddNode("fixture.trigger")
     local first = Presets.Add("Kept", graph, {})
     luaunit.assertNotNil(first)
-    local previous = PersistentDB:GetString("presets")
+    local previousIndex = PersistentDB:GetString("scope_presets")
+    local previousPayload = PersistentDB:GetString("scope_presets_" .. first.id)
+    luaunit.assertNotNil(previousIndex)
+    luaunit.assertNotNil(previousPayload)
     function PersistentDB:SetString()
         return false
     end
@@ -839,28 +848,36 @@ function TestPresets:testSetStringFalseLeavesThePreviousPresetBytes()
 
     luaunit.assertNil(second)
     luaunit.assertEquals(err, "Could not save the preset.")
-    luaunit.assertEquals(PersistentDB:GetString("presets"), previous)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets"), previousIndex)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. first.id), previousPayload)
+    luaunit.assertNil(PersistentDB:GetString("presets"))
+    luaunit.assertNil(PersistentDB:GetString("scope_presets_2"))
 end
 
 function TestPresets:testSetStringNilOrThrowLeavesThePreviousPresetBytes()
     local graph = LibNodeGraph.NewGraph(self.registry)
     graph:AddNode("fixture.trigger")
-    luaunit.assertNotNil(Presets.Add("Kept", graph, {}))
-    local previous = PersistentDB:GetString("presets")
+    local first = Presets.Add("Kept", graph, {})
+    luaunit.assertNotNil(first)
+    local previousIndex = PersistentDB:GetString("scope_presets")
+    local previousPayload = PersistentDB:GetString("scope_presets_" .. first.id)
 
     function PersistentDB:SetString()
         return nil
     end
     local added = Presets.Add("Nil", graph, {})
     luaunit.assertNil(added)
-    luaunit.assertEquals(PersistentDB:GetString("presets"), previous)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets"), previousIndex)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. first.id), previousPayload)
 
     function PersistentDB:SetString()
         error("rejected")
     end
     added = Presets.Add("Thrown", graph, {})
     luaunit.assertNil(added)
-    luaunit.assertEquals(PersistentDB:GetString("presets"), previous)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets"), previousIndex)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. first.id), previousPayload)
+    luaunit.assertNil(PersistentDB:GetString("presets"))
 end
 
 function TestPresets:testFailedPresetSaveAsksToTellThePlayer()
@@ -879,4 +896,294 @@ function TestPresets:testFailedPresetSaveAsksToTellThePlayer()
     asked = 0
     luaunit.assertNil(Presets.Add("   ", graph, {}))
     luaunit.assertEquals(asked, 0)
+end
+
+local function decodeToken(text)
+    luaunit.assertEquals(type(text), "string")
+    luaunit.assertEquals(text:sub(1, 3), "WD1")
+    return LibNodeGraph.Json.Default.decode(Compress.decompress(text))
+end
+
+function TestPresets:testSaveWritesOnePresetKeyAndAVersion2Index()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    local nodeId = graph:AddNode("fixture.trigger")
+    local preset, err = Presets.Add("Alpha", graph, { [nodeId] = { x = 4, y = 8 } })
+
+    luaunit.assertNil(err)
+    luaunit.assertNil(PersistentDB:GetString("presets"))
+    local index = decodeToken(PersistentDB:GetString("scope_presets"))
+    luaunit.assertEquals(index.version, 2)
+    luaunit.assertEquals(#index.presets, 1)
+    luaunit.assertEquals(index.presets[1].id, preset.id)
+    luaunit.assertEquals(index.presets[1].name, "Alpha")
+    luaunit.assertEquals(index.presets[1].variables, {})
+    luaunit.assertNil(index.presets[1].graph)
+    luaunit.assertNil(index.presets[1].layout)
+    local payload = decodeToken(PersistentDB:GetString("scope_presets_" .. preset.id))
+    luaunit.assertEquals(payload.version, 1)
+    luaunit.assertEquals(payload.graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(payload.layout, { { id = nodeId, x = 4, y = 8 } })
+    local loaded = Presets.Load()
+    luaunit.assertEquals(loaded.presets[1].name, "Alpha")
+    luaunit.assertEquals(loaded.presets[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(loaded.presets[1].layout, { { id = nodeId, x = 4, y = 8 } })
+    luaunit.assertEquals(loaded.presets[1].variables, {})
+end
+
+function TestPresets:testRenameWritesOnlyTheIndex()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local preset = Presets.Add("Alpha", graph, {})
+    local payload = PersistentDB:GetString("scope_presets_" .. preset.id)
+    local legacy = PersistentDB:GetString("presets")
+
+    local renamed, err = Presets.Rename(preset.id, "  Beta  ")
+
+    luaunit.assertNil(err)
+    luaunit.assertEquals(renamed.name, "Beta")
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. preset.id), payload)
+    luaunit.assertEquals(PersistentDB:GetString("presets"), legacy)
+    local index = decodeToken(PersistentDB:GetString("scope_presets"))
+    luaunit.assertEquals(index.version, 2)
+    luaunit.assertEquals(index.presets[1].name, "Beta")
+    luaunit.assertNil(index.presets[1].graph)
+    local loaded = Presets.Load()
+    luaunit.assertEquals(loaded.presets[1].name, "Beta")
+    luaunit.assertEquals(loaded.presets[1].graph.nodes[1].type, "fixture.trigger")
+end
+
+function TestPresets:testDeleteWritesTheIndexBeforeThePresetKey()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local gone = Presets.Add("Gone", graph, {})
+    local kept = Presets.Add("Kept", graph, {})
+    local keptPayload = PersistentDB:GetString("scope_presets_" .. kept.id)
+    local order = {}
+    local innerSet = PersistentDB.SetString
+    local innerDelete = PersistentDB.Delete
+    function PersistentDB:SetString(key, value)
+        order[#order + 1] = "set:" .. key
+        return innerSet(self, key, value)
+    end
+    function PersistentDB:Delete(key)
+        order[#order + 1] = "del:" .. key
+        local index = decodeToken(self.data.scope_presets)
+        luaunit.assertEquals(#index.presets, 1)
+        luaunit.assertEquals(index.presets[1].id, kept.id)
+        return innerDelete(self, key)
+    end
+
+    local ok, err = Presets.Delete(gone.id)
+
+    luaunit.assertNil(err)
+    luaunit.assertEquals(ok, true)
+    luaunit.assertEquals(order, {
+        "set:scope_presets",
+        "del:scope_presets_" .. gone.id,
+    })
+    luaunit.assertNil(PersistentDB:GetString("scope_presets_" .. gone.id))
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. kept.id), keptPayload)
+    luaunit.assertNil(PersistentDB:GetString("presets"))
+    local loaded = Presets.Load()
+    luaunit.assertEquals(#loaded.presets, 1)
+    luaunit.assertEquals(loaded.presets[1].name, "Kept")
+end
+
+function TestPresets:testAFailedPresetKeyDeleteLeavesTheBytesAndDropsTheIndexRow()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local preset = Presets.Add("Gone", graph, {})
+    local payload = PersistentDB:GetString("scope_presets_" .. preset.id)
+    function PersistentDB:Delete()
+        return false
+    end
+
+    local ok = Presets.Delete(preset.id)
+
+    luaunit.assertEquals(ok, true)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. preset.id), payload)
+    local index = decodeToken(PersistentDB:GetString("scope_presets"))
+    luaunit.assertEquals(index.presets, {})
+    luaunit.assertEquals(Presets.Load().presets, {})
+end
+
+local function legacyLibrary(presets)
+    return LibNodeGraph.Json.Default.encode({ version = 1, presets = presets })
+end
+
+local function oneLegacyPreset(id, name, text)
+    return {
+        id = id,
+        name = name,
+        graph = {
+            version = 1,
+            nodes = { { id = 1, type = "fixture.trigger", controls = { text = text } } },
+            connections = {},
+        },
+        layout = {},
+        variables = { { nodeId = 1, pinName = "text" } },
+    }
+end
+
+function TestPresets:testStartupMovesALegacyLibraryOntoTheNewKeys()
+    local legacy = legacyLibrary({ oneLegacyPreset(4, "Horn", "ok") })
+    PersistentDB:SetString("presets", legacy)
+
+    luaunit.assertNil(Presets.Migrate())
+
+    luaunit.assertEquals(PersistentDB:GetString("presets"), legacy)
+    local index = decodeToken(PersistentDB:GetString("scope_presets"))
+    luaunit.assertEquals(index.version, 2)
+    luaunit.assertEquals(index.presets[1].id, 4)
+    luaunit.assertEquals(index.presets[1].name, "Horn")
+    luaunit.assertEquals(index.presets[1].variables, { { nodeId = 1, pinName = "text" } })
+    luaunit.assertNil(index.presets[1].graph)
+    local payload = decodeToken(PersistentDB:GetString("scope_presets_4"))
+    luaunit.assertEquals(payload.version, 1)
+    luaunit.assertEquals(payload.graph.nodes[1].controls.text, "ok")
+    local loaded = Presets.Load()
+    luaunit.assertEquals(loaded.presets[1].name, "Horn")
+    luaunit.assertEquals(loaded.presets[1].graph.nodes[1].controls.text, "ok")
+    luaunit.assertEquals(loaded.presets[1].variables[1].pinName, "text")
+end
+
+function TestPresets:testAnEmptyLegacyLibraryBecomesAnEmptyIndex()
+    local legacy = legacyLibrary({})
+    PersistentDB:SetString("presets", legacy)
+
+    luaunit.assertNil(Presets.Migrate())
+
+    luaunit.assertEquals(PersistentDB:GetString("presets"), legacy)
+    local index = decodeToken(PersistentDB:GetString("scope_presets"))
+    luaunit.assertEquals(index.version, 2)
+    luaunit.assertEquals(index.presets, {})
+    luaunit.assertNotEquals(PersistentDB:GetString("scope_presets"), "")
+    PersistentDB:SetString("presets", legacyLibrary({ oneLegacyPreset(1, "Came back", "no") }))
+    luaunit.assertEquals(Presets.Load().presets, {})
+    luaunit.assertNil(Presets.Migrate())
+    luaunit.assertEquals(Presets.Load().presets, {})
+end
+
+function TestPresets:testAnUnreadableLegacyLibraryDoesNotCreateTheIndex()
+    PersistentDB:SetString("presets", "{not-a-library")
+
+    local failure = Presets.Migrate()
+
+    luaunit.assertEquals(failure.reason, "failed")
+    luaunit.assertNil(PersistentDB:GetString("scope_presets"))
+    luaunit.assertEquals(PersistentDB:GetString("presets"), "{not-a-library")
+end
+
+function TestPresets:testAnUnreadablePresetIndexIsAnEmptyLibraryAndIsNotWritten()
+    local future = Compress.compress(LibNodeGraph.Json.Default.encode({
+        version = 9,
+        presets = { { id = 1, name = "Later", variables = {} } },
+    }))
+    PersistentDB:SetString("scope_presets", future)
+    PersistentDB:SetString("presets", legacyLibrary({ oneLegacyPreset(1, "Old", "keep") }))
+    local asked = 0
+    Presets.SetLoadFailed(function() asked = asked + 1 end)
+    local inner = PersistentDB.GetString
+    function PersistentDB:GetString(key)
+        if key == "presets" then error("read the legacy library") end
+        return inner(self, key)
+    end
+
+    local doc, err = Presets.Load()
+    luaunit.assertNil(err)
+    luaunit.assertEquals(doc.presets, {})
+    luaunit.assertEquals(asked, 1)
+    local again = Presets.Load()
+    luaunit.assertEquals(again.presets, {})
+    luaunit.assertEquals(asked, 1)
+
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local added, addErr = Presets.Add("New", graph, {})
+    luaunit.assertNil(added)
+    luaunit.assertNotNil(addErr)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets"), future)
+    luaunit.assertEquals(PersistentDB.data.presets, legacyLibrary({ oneLegacyPreset(1, "Old", "keep") }))
+end
+
+function TestPresets:testAPresetPayloadThisBuildDoesNotUnderstandStaysOnDisk()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local preset = Presets.Add("Alpha", graph, {})
+    local future = Compress.compress(LibNodeGraph.Json.Default.encode({
+        version = 9,
+        graph = { version = 1, nodes = {}, connections = {} },
+        layout = {},
+    }))
+    PersistentDB:SetString("scope_presets_" .. preset.id, future)
+
+    local loaded = Presets.Load()
+    luaunit.assertEquals(loaded.presets[1].name, "Alpha")
+    luaunit.assertNil(loaded.presets[1].graph)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. preset.id), future)
+
+    local renamed = Presets.Rename(preset.id, "Beta")
+    luaunit.assertEquals(renamed.name, "Beta")
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. preset.id), future)
+    luaunit.assertEquals(decodeToken(PersistentDB:GetString("scope_presets")).presets[1].name, "Beta")
+end
+
+-- Letters only. The preset save strips `<...>` before it measures the token,
+-- and the digit alphabet includes those characters, which would shrink a
+-- too-big graph under the cap and hide the refusal.
+local function incompressible(count)
+    local parts = {}
+    local x = 123456789
+    for i = 1, count do
+        x = (1103515245 * x + 12345) % 2147483648
+        parts[i] = string.char(65 + (x % 26))
+    end
+    return table.concat(parts)
+end
+
+function TestPresets:testAPresetThatDoesNotFitShowsTheSizeFailureEveryTime()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local kept = Presets.Add("Kept", graph, {})
+    local previousIndex = PersistentDB:GetString("scope_presets")
+    local previousPayload = PersistentDB:GetString("scope_presets_" .. kept.id)
+    local reasons = {}
+    Presets.SetSaveFailed(function(reason) reasons[#reasons + 1] = reason end)
+    local huge = LibNodeGraph.NewGraph(self.registry)
+    local nodeId = huge:AddNode("fixture.note")
+    huge:SetControl(nodeId, "text", incompressible(200000))
+
+    local first, firstErr = Presets.Add("Essay", huge, {})
+    local second, secondErr = Presets.Add("Essay", huge, {})
+
+    luaunit.assertNil(first)
+    luaunit.assertNil(second)
+    luaunit.assertNotNil(firstErr)
+    luaunit.assertNotNil(secondErr)
+    luaunit.assertEquals(reasons, { "size", "size" })
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets"), previousIndex)
+    luaunit.assertEquals(PersistentDB:GetString("scope_presets_" .. kept.id), previousPayload)
+    luaunit.assertNil(PersistentDB:GetString("presets"))
+    luaunit.assertEquals(#huge.nodes[nodeId].controls.text, 200000)
+    luaunit.assertEquals(Presets.Load().presets[1].name, "Kept")
+end
+
+function TestPresets:testALibraryMigratesOnlyWhenEveryPresetFits()
+    local hugeText = incompressible(200000)
+    local legacy = legacyLibrary({
+        oneLegacyPreset(1, "Horn", "ok"),
+        oneLegacyPreset(2, "Essay", hugeText),
+    })
+    PersistentDB:SetString("presets", legacy)
+
+    local failure = Presets.Migrate()
+
+    luaunit.assertEquals(failure.reason, "size")
+    luaunit.assertEquals(failure.name, "Essay")
+    luaunit.assertNil(PersistentDB:GetString("scope_presets"))
+    luaunit.assertEquals(PersistentDB:GetString("presets"), legacy)
+    local loaded = Presets.Load()
+    luaunit.assertEquals(loaded.presets[1].name, "Horn")
+    luaunit.assertEquals(loaded.presets[2].name, "Essay")
+    luaunit.assertEquals(#loaded.presets[2].graph.nodes[1].controls.text, 200000)
 end

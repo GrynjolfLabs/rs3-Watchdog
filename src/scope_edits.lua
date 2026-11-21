@@ -115,11 +115,11 @@ end
 ---@param doc Watchdog.Bucket
 ---@return boolean
 function ScopeEdits:_save(key, doc)
-    local ok = self.store.SaveTo(key, doc) == true
-    if not ok and self.onSaveFailed ~= nil then
-        self.onSaveFailed()
+    local ok, reason = self.store.PersistScope(key, doc)
+    if ok ~= true and self.onSaveFailed ~= nil then
+        self.onSaveFailed(reason)
     end
-    return ok
+    return ok == true
 end
 
 ---@param reason string|nil
@@ -129,9 +129,10 @@ function ScopeEdits:_report(reason)
     end
 end
 
--- A scope already on the new keys writes each alert, then the tree. A legacy
--- scope still writes the old document. An unreadable scope is the caller's
--- job to refuse before it changes the tree.
+-- A scope already on the new keys writes each changed alert, then the tree.
+-- A scope still on the legacy document writes every alert, then the tree, and
+-- does not write the legacy key. An unreadable scope is the caller's job to
+-- refuse before it changes the tree.
 ---@param key string
 ---@param doc Watchdog.Bucket
 ---@param entries Watchdog.Entry[]
@@ -168,7 +169,12 @@ function ScopeEdits:ToggleEnabled(scopeKey, id)
     if entry == nil then return leave() end
     local nextEnabled = not (entry.enabled ~= false)
     self.store.SetEnabled(doc, id, nextEnabled)
-    self.store.SaveTo(key, doc)
+    -- A size refusal is the same dialog as any other oversized save. Any other
+    -- failure stays the enable log line, and the new flag stays for the session.
+    local ok, reason = self.store.PersistScope(key, doc)
+    if ok ~= true and reason == "size" then
+        self:_report(reason)
+    end
     if entry.kind == "alert" then
         self.runtime:SetAlertEnabled(id, nextEnabled, key)
         local _, _, list = self:_bucket(scopeKey)

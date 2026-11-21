@@ -360,6 +360,16 @@ function TestDialog:testTooBigMessageSaysItIsTooBig()
     luaunit.assertEquals(win.buttons[1].label, "Close")
 end
 
+function TestDialog:testTooBigMessageNamesTheAlert()
+    local win = Dialog.tooBig(self.parent, "Essay")
+    luaunit.assertEquals(win.title, "Too big to save")
+    luaunit.assertEquals(win.texts, {
+        "Essay is too big to save.",
+        "The last saved copy is still there.",
+    })
+    luaunit.assertEquals(win.buttons[1].label, "Close")
+end
+
 function TestDialog:testUnreadAlertMessageNamesTheAlert()
     local win = Dialog.unreadAlerts(self.parent, { "Horn" })
     luaunit.assertEquals(win.title, "Could not load")
@@ -372,6 +382,17 @@ function TestDialog:testUnreadableScopeMessageDoesNotCallItASizeProblem()
     luaunit.assertEquals(win.title, "Could not load")
     luaunit.assertEquals(win.texts, {
         "This scope could not be read.",
+        "Nothing was written over the saved copy.",
+    })
+    local body = table.concat(win.texts, " ")
+    luaunit.assertNil(body:find("too big", 1, true))
+end
+
+function TestDialog:testUnreadablePresetIndexMessageDoesNotCallItASizeProblem()
+    local win = Dialog.presetsUnreadable(self.parent)
+    luaunit.assertEquals(win.title, "Could not load")
+    luaunit.assertEquals(win.texts, {
+        "Presets could not be read.",
         "Nothing was written over the saved copy.",
     })
     local body = table.concat(win.texts, " ")

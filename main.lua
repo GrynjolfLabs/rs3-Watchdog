@@ -151,14 +151,32 @@ local function presentLoadNotices()
     for _, item in ipairs(pending) do
         if item.kind == "scope" then
             Dialog.scopeUnreadable(parent)
+        elseif item.kind == "save" then
+            if item.reason == "size" then
+                Dialog.tooBig(parent, item.name)
+            else
+                Dialog.failedSave(parent)
+            end
+        elseif item.kind == "presets" then
+            Dialog.presetsUnreadable(parent)
         else
             Dialog.unreadAlerts(parent, item.names)
         end
     end
 end
 
+---@param fail { reason: "size"|"failed"|nil, name: string|nil }|nil
+local function queueSaveFailure(fail)
+    if fail == nil then return end
+    loadNotices[#loadNotices + 1] = { kind = "save", reason = fail.reason, name = fail.name }
+end
+
 runtime:SetBucketLoader(function(trackingId)
     local key = Store.PlayerKey(trackingId)
+    -- Disk migration finishes before this scope is armed. A character the
+    -- startup list did not see (the list failed, or they were not on disk
+    -- yet) moves here. A failure uses the old document and tells the player.
+    queueSaveFailure(Store.MigrateScope(key))
     local playerDoc, unread, problem = Store.LoadScope(key)
     queueLoadNotice(unread, problem)
     presentLoadNotices()
@@ -171,6 +189,18 @@ runtime:SetBucketLoader(function(trackingId)
     charScope = { key = key, displayName = playerIdentity:DisplayName(), doc = playerDoc, alerts = restoredChar }
     return restoredChar
 end)
+
+-- List keys, then move global and every numeric character scope. A character
+-- that does not fit is only logged here. The dialog waits until that scope is armed.
+local migrationFailures = Store.MigrateListed()
+for _, fail in ipairs(migrationFailures) do
+    if fail.identity == "global" then
+        queueSaveFailure(fail)
+    end
+end
+-- The library does not need the key list. An index that does not fit is
+-- queued here and shown when the shell opens. The legacy value is not written.
+queueSaveFailure(Presets.Migrate())
 
 local document, globalUnread, globalProblem = Store.LoadScope("global")
 queueLoadNotice(globalUnread, globalProblem)
@@ -192,6 +222,7 @@ end
 
 local editor = Editor.new(registry, runtime)
 
+local reportFailedSave
 runtime:SetPersistence({
     SaveEnabled = function(key, id, enabled)
         local doc
@@ -203,7 +234,11 @@ runtime:SetPersistence({
         if doc == nil or not Store.SetEnabled(doc, id, enabled) then
             return false
         end
-        return Store.SaveTo(key, doc)
+        local ok, reason = Store.PersistScope(key, doc)
+        if ok ~= true and reason == "size" and reportFailedSave ~= nil then
+            reportFailedSave(reason)
+        end
+        return ok == true
     end,
 })
 
@@ -224,12 +259,12 @@ do
         runtime.infobox:SetAnchor(ax, ay)
     end
 end
-local reportFailedSave
 runtime.infobox:SetPersistence({
     SaveAnchor = function(x, y)
         Store.SetInfoBoxAnchor(document, x, y)
-        if not Store.Save(document) and reportFailedSave ~= nil then
-            reportFailedSave()
+        local ok, reason = Store.PersistScope("global", document)
+        if ok ~= true and reportFailedSave ~= nil then
+            reportFailedSave(reason)
         end
     end,
 })
@@ -364,6 +399,10 @@ reportFailedSave = function(reason)
     end
 end
 Presets.SetSaveFailed(reportFailedSave)
+Presets.SetLoadFailed(function()
+    loadNotices[#loadNotices + 1] = { kind = "presets" }
+    presentLoadNotices()
+end)
 
 edits = ScopeEdits.new({
     store = Store,

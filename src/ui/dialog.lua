@@ -397,15 +397,22 @@ end
 
 -- A token over the PersistentDB cap. The same dialog covers an alert, a
 -- scope tree, and a preset. It is not the generic failed-save dialog.
+-- `name` is the alert that did not fit. A scope tree or a preset has no
+-- single alert name, so the line stays generic.
 ---@param parent any
+---@param name string|nil
 ---@return any|nil window
-function Dialog.tooBig(parent)
+function Dialog.tooBig(parent, name)
+    local lead = "That change is too big to save."
+    if type(name) == "string" and name ~= "" then
+        lead = name .. " is too big to save."
+    end
     return Dialog.mount(parent, {
         title = "Too big to save",
         width = 420,
         height = 180,
         content = function(win)
-            win:AddText("That change is too big to save.")
+            win:AddText(lead)
             win:AddText("The last saved copy is still there.")
         end,
         actions = { { label = "Close" } },
@@ -448,6 +455,23 @@ function Dialog.scopeUnreadable(parent)
         height = 180,
         content = function(win)
             win:AddText("This scope could not be read.")
+            win:AddText("Nothing was written over the saved copy.")
+        end,
+        actions = { { label = "Close" } },
+    })
+end
+
+-- The preset index is present and this build cannot use it. The legacy
+-- library is not a fallback, and nothing may write over the bad key.
+---@param parent any
+---@return any|nil window
+function Dialog.presetsUnreadable(parent)
+    return Dialog.mount(parent, {
+        title = "Could not load",
+        width = 420,
+        height = 180,
+        content = function(win)
+            win:AddText("Presets could not be read.")
             win:AddText("Nothing was written over the saved copy.")
         end,
         actions = { { label = "Close" } },

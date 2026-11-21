@@ -1,11 +1,13 @@
--- Preset library. One plugin-wide document under the PersistentDB key `presets`
--- (no watchdog_ prefix). Not a Scope Bucket: Store.Save / SaveTo never write this key.
--- Does not copy a Preset into a Scope and does not read the Pack registry.
+-- Preset library. The index is `scope_presets` (version 2: id, name, variables).
+-- Each graph is `scope_presets_<id>` (version 1: version, graph, layout), a WD1 token.
+-- The legacy `presets` value stays on disk as the pre-migration snapshot. Nothing
+-- writes or deletes it. Not a Scope Bucket, and not the Pack registry.
 
 local ControlKinds = require("src/ui/control_kinds")
 local Util = require("src/util")
 local Text = require("src/text")
 local DropDismissOn = require("src/drop_dismiss_on")
+local Compress = require("src/compress")
 
 local Presets = {}
 
@@ -21,7 +23,16 @@ local MARKABLE_WIDGET = {
 
 local DB_KEY = "presets"
 local DOC_VERSION = 1
+local INDEX_KEY = "scope_presets"
+local INDEX_VERSION = 2
+local PAYLOAD_VERSION = 1
+-- PersistentDB leaves the previous bytes when the stored token is longer than this.
+local TOKEN_CAP = 131070
 local onSaveFailed
+local onLoadFailed
+local boundDb
+local indexBlocked = false
+local reportedUnreadable = false
 -- Blank and longer-than-this names are refused. Pack Alert Presets use this same cap.
 Presets.NAME_MAX = 80
 local NAME_MAX = Presets.NAME_MAX
@@ -62,14 +73,72 @@ local function report(message)
     end
 end
 
--- A missing key is an empty version-1 library. Load does not create the key.
+local function bindDb()
+    if boundDb ~= PersistentDB then
+        boundDb = PersistentDB
+        indexBlocked = false
+        reportedUnreadable = false
+    end
+end
+
+---@param key string
+---@return boolean got
+---@return string|nil text
+---@return any err
+local function readString(key)
+    local text
+    local got, err = pcall(function() text = PersistentDB:GetString(key) end)
+    return got, text, err
+end
+
+---@param id integer
+---@return string
+local function payloadKey(id)
+    return INDEX_KEY .. "_" .. tostring(id)
+end
+
+-- The new index is present and this build cannot use it. The session keeps an
+-- empty library and does not read the legacy snapshot, so a bad read is not
+-- saved back as an empty index.
+local function blockIndex(detail)
+    indexBlocked = true
+    report(detail)
+    if not reportedUnreadable and onLoadFailed ~= nil then
+        reportedUnreadable = true
+        onLoadFailed()
+    else
+        reportedUnreadable = true
+    end
+end
+
+---@param text string|nil
+---@return table|nil
+local function decodeToken(text)
+    if type(text) ~= "string" or text == "" then return nil end
+    if text:sub(1, #Compress.PREFIX) ~= Compress.PREFIX then return nil end
+    local inflated, json = pcall(Compress.decompress, text)
+    if not inflated or type(json) ~= "string" then return nil end
+    local c = codec()
+    if c == nil then return nil end
+    local ok, doc = pcall(function() return c.decode(json) end)
+    if not ok or type(doc) ~= "table" then return nil end
+    return doc
+end
+
+---@param name string|nil
+---@return string
+local function strippedName(name)
+    if type(name) ~= "string" then return "Preset" end
+    local stripped = Text.StripTags(name)
+    return stripped ~= "" and stripped or "Preset"
+end
+
+-- Legacy `presets` is one version-1 document. A missing key is an empty library.
 -- Unreadable JSON, or any version other than 1, is reported and left on disk.
 ---@return Watchdog.PresetDoc|nil doc
 ---@return string|nil err
-function Presets.Load()
-    if PersistentDB == nil then return Presets.Empty(), nil end
-    local text
-    local got, getErr = pcall(function() text = PersistentDB:GetString(DB_KEY) end)
+local function loadLegacy()
+    local got, text, getErr = readString(DB_KEY)
     if not got then
         report("presets document unreadable, left on disk - " .. tostring(getErr))
         return nil, "Presets could not be read."
@@ -93,16 +162,65 @@ function Presets.Load()
     end
     for _, preset in ipairs(doc.presets) do
         if type(preset) == "table" and type(preset.name) == "string" then
-            local stripped = Text.StripTags(preset.name)
-            preset.name = stripped ~= "" and stripped or "Preset"
+            preset.name = strippedName(preset.name)
         end
-        -- Same raw document Bucket load rewrites. Instantiate reads this result,
-        -- so it does not migrate a second time.
+        -- Same raw document Instantiate reads. It does not migrate a second time.
         if type(preset) == "table" and type(preset.graph) == "table" then
             preset.layout = DropDismissOn.Apply(preset.graph, preset.layout)
         end
     end
     return doc, nil
+end
+
+---@param text string
+---@return Watchdog.PresetDoc doc
+local function loadIndex(text)
+    local index = decodeToken(text)
+    if index == nil or index.version ~= INDEX_VERSION or type(index.presets) ~= "table" then
+        blockIndex("presets document unreadable, left on disk")
+        return Presets.Empty()
+    end
+    local doc = Presets.Empty()
+    for _, row in ipairs(index.presets) do
+        if type(row) == "table" and type(row.id) == "number" then
+            local preset = {
+                id = row.id,
+                name = strippedName(row.name),
+                variables = type(row.variables) == "table" and row.variables or {},
+                graph = nil,
+                layout = {},
+            }
+            local got, payloadText = readString(payloadKey(row.id))
+            local payload = got and decodeToken(payloadText) or nil
+            -- A payload this build does not understand stays on disk. The index
+            -- row stays so a later list edit does not drop it.
+            if payload ~= nil and payload.version == PAYLOAD_VERSION and type(payload.graph) == "table" then
+                preset.graph = payload.graph
+                preset.layout = DropDismissOn.Apply(payload.graph, payload.layout)
+            end
+            doc.presets[#doc.presets + 1] = preset
+        end
+    end
+    return doc
+end
+
+-- A missing index with no legacy key is an empty library. Load does not create
+-- the index. An index that is present but unreadable is an empty library for
+-- this session, and the legacy document is not read.
+---@return Watchdog.PresetDoc|nil doc
+---@return string|nil err
+function Presets.Load()
+    bindDb()
+    if PersistentDB == nil then return Presets.Empty(), nil end
+    local got, text, getErr = readString(INDEX_KEY)
+    if not got then
+        blockIndex("presets document unreadable, left on disk - " .. tostring(getErr))
+        return Presets.Empty(), nil
+    end
+    if type(text) == "string" and text ~= "" then
+        return loadIndex(text), nil
+    end
+    return loadLegacy()
 end
 
 --- Leading and trailing whitespace and client text tags are removed. A non-string is empty.
@@ -142,38 +260,195 @@ local function mintId(doc)
 end
 
 ---@param detail string
+---@param reason "size"|"failed"|nil
 ---@return boolean
-local function failSave(detail)
+local function failSave(detail, reason)
     report(detail)
-    if onSaveFailed ~= nil then onSaveFailed() end
+    if onSaveFailed ~= nil then onSaveFailed(reason) end
     return false
+end
+
+---@param payload table
+---@return string|nil token
+---@return "size"|"failed"|nil reason
+local function encodeToken(payload)
+    local c = codec()
+    if c == nil then return nil, "failed" end
+    local ok, json = pcall(function() return c.encode(payload) end)
+    if not ok or type(json) ~= "string" then return nil, "failed" end
+    local compressed, token = pcall(Compress.compress, json)
+    if not compressed or type(token) ~= "string" then return nil, "failed" end
+    if #token > TOKEN_CAP then return nil, "size" end
+    return token
+end
+
+-- False, nil, and a throw leave the previous bytes. A true return is the save.
+-- The legacy `presets` key is never passed here.
+---@param key string
+---@param payload table
+---@return boolean
+---@return "size"|"failed"|nil reason
+local function putToken(key, payload)
+    if PersistentDB == nil then return false, "failed" end
+    local token, reason = encodeToken(payload)
+    if token == nil then return false, reason or "failed" end
+    local ok, stored = pcall(function() return PersistentDB:SetString(key, token) end)
+    if not ok or stored ~= true then return false, "failed" end
+    return true
+end
+
+---@return boolean
+local function indexIsPresent()
+    if PersistentDB == nil then return false end
+    local got, text = readString(INDEX_KEY)
+    return got and type(text) == "string" and text ~= ""
+end
+
+---@param preset Watchdog.Preset
+---@return boolean
+---@return "size"|"failed"|nil reason
+local function putPayload(preset)
+    return putToken(payloadKey(preset.id), {
+        version = PAYLOAD_VERSION,
+        graph = preset.graph,
+        layout = preset.layout or {},
+    })
 end
 
 ---@param doc Watchdog.PresetDoc
 ---@return boolean
-local function write(doc)
-    if PersistentDB == nil then return failSave("failed to save presets document - no PersistentDB") end
-    local c = codec()
-    if c == nil then
-        return failSave("failed to encode presets document - no JSON codec")
+---@return "size"|"failed"|nil reason
+local function putIndex(doc)
+    local rows = {}
+    for i, preset in ipairs(doc.presets or {}) do
+        rows[i] = {
+            id = preset.id,
+            name = preset.name,
+            variables = preset.variables or {},
+        }
     end
-    local ok, text = pcall(function() return c.encode(doc) end)
-    if not ok or type(text) ~= "string" then
-        return failSave("failed to encode presets document - " .. tostring(text))
+    return putToken(INDEX_KEY, { version = INDEX_VERSION, presets = rows })
+end
+
+-- While the index is absent, every graph has to be stored before the index
+-- exists, or the next load would still be the legacy document. Once the index
+-- exists, a graph save writes that one key and then the index.
+---@param doc Watchdog.PresetDoc
+---@param payloadId integer|nil
+---@return boolean
+local function commitSave(doc, payloadId)
+    bindDb()
+    if indexBlocked then
+        return failSave("failed to save presets document - unreadable index", "failed")
     end
-    -- False, nil, and a throw leave the previous bytes. A true return is the save.
-    local stored
-    ok, stored = pcall(function() return PersistentDB:SetString(DB_KEY, text) end)
-    if not ok or stored ~= true then
-        return failSave("failed to save presets document - " .. tostring(stored))
+    if indexIsPresent() then
+        if payloadId ~= nil then
+            for _, preset in ipairs(doc.presets or {}) do
+                if preset.id == payloadId then
+                    local ok, reason = putPayload(preset)
+                    if not ok then
+                        return failSave("failed to save presets document - " .. tostring(reason), reason)
+                    end
+                    break
+                end
+            end
+        end
+    else
+        for _, preset in ipairs(doc.presets or {}) do
+            local ok, reason = putPayload(preset)
+            if not ok then
+                return failSave("failed to save presets document - " .. tostring(reason), reason)
+            end
+        end
+    end
+    local ok, reason = putIndex(doc)
+    if not ok then
+        return failSave("failed to save presets document - " .. tostring(reason), reason)
+    end
+    return true
+end
+
+-- The index without this preset is written first. The payload key is deleted
+-- only after that write returns true. A false, nil, or thrown Delete leaves
+-- the payload bytes and still counts the preset as removed from the library.
+---@param doc Watchdog.PresetDoc
+---@param removedId integer
+---@return boolean
+local function commitDelete(doc, removedId)
+    bindDb()
+    if indexBlocked then
+        return failSave("failed to save presets document - unreadable index", "failed")
+    end
+    local hadIndex = indexIsPresent()
+    if not hadIndex then
+        for _, preset in ipairs(doc.presets or {}) do
+            local ok, reason = putPayload(preset)
+            if not ok then
+                return failSave("failed to save presets document - " .. tostring(reason), reason)
+            end
+        end
+    end
+    local ok, reason = putIndex(doc)
+    if not ok then
+        return failSave("failed to save presets document - " .. tostring(reason), reason)
+    end
+    if hadIndex and PersistentDB ~= nil then
+        local deletedOk, deleted = pcall(function()
+            return PersistentDB:Delete(payloadKey(removedId))
+        end)
+        if not deletedOk or deleted ~= true then
+            report("failed to delete preset key '" .. payloadKey(removedId) .. "'")
+        end
     end
     return true
 end
 
 -- main points this at the save-failed message dialog. Tests replace it.
----@param fn fun()|nil
+---@param fn fun(reason: "size"|"failed"|nil)|nil
 function Presets.SetSaveFailed(fn)
     onSaveFailed = fn
+end
+
+-- One dialog when `scope_presets` is present and this build cannot read it.
+---@param fn fun()|nil
+function Presets.SetLoadFailed(fn)
+    onLoadFailed = fn
+end
+
+-- Moves a legacy `presets` document onto the index and payload keys. An index
+-- that already exists is left alone, including one this build cannot read.
+-- An empty legacy library becomes an empty index so the old list is not copied
+-- back. One graph that does not fit leaves the index absent.
+---@return { reason: "size"|"failed", name: string|nil }|nil
+function Presets.Migrate()
+    bindDb()
+    if PersistentDB == nil then return nil end
+    local got, text = readString(INDEX_KEY)
+    if not got or (type(text) == "string" and text ~= "") then
+        return nil
+    end
+    local legacyGot, legacy = readString(DB_KEY)
+    if not legacyGot or type(legacy) ~= "string" or legacy == "" then
+        return nil
+    end
+    local doc = loadLegacy()
+    if doc == nil then
+        report("could not migrate presets")
+        return { reason = "failed" }
+    end
+    for _, preset in ipairs(doc.presets or {}) do
+        local ok, reason = putPayload(preset)
+        if not ok then
+            report("could not migrate presets")
+            return { reason = reason or "failed", name = preset.name }
+        end
+    end
+    local ok, reason = putIndex(doc)
+    if not ok then
+        report("could not migrate presets")
+        return { reason = reason or "failed" }
+    end
+    return nil
 end
 
 ---@param nodeId integer
@@ -270,7 +545,7 @@ function Presets.Add(name, graph, layout, variables)
         variables = marks,
     }
     doc.presets[#doc.presets + 1] = preset
-    if not write(doc) then
+    if not commitSave(doc, preset.id) then
         return nil, "Could not save the preset."
     end
     return preset, nil
@@ -442,7 +717,7 @@ function Presets.Rename(id, name)
         return nil, "Preset not found."
     end
     preset.name = trimmed
-    if not write(doc) then
+    if not commitSave(doc, nil) then
         return nil, "Could not rename the preset."
     end
     return preset, nil
@@ -469,7 +744,7 @@ function Presets.Delete(id)
         return nil, "Preset not found."
     end
     table.remove(doc.presets, index)
-    if not write(doc) then
+    if not commitDelete(doc, id) then
         return nil, "Could not delete the preset."
     end
     return true, nil
