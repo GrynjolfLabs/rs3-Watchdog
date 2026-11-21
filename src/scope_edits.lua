@@ -28,6 +28,7 @@ local PresetCopy = require("src/preset_copy")
 ---@field lookup (fun(scopeKey: string): Watchdog.Bucket|nil, string|nil, Watchdog.RestoredAlert[]|nil)|nil
 ---@field onSaveFailed fun()|nil
 ---@field _savedEncode string|nil
+---@field _pendingAlerts table<string, integer[]>
 ---@field _sizeWarned boolean
 local ScopeEdits = {}
 ScopeEdits.__index = ScopeEdits
@@ -99,6 +100,10 @@ function ScopeEdits.new(deps)
         lookup = deps.bucket,
         onSaveFailed = deps.onSaveFailed,
         _savedEncode = nil,
+        -- Alert ids whose key was stored, or still needs storing, while the
+        -- scope tree does not name them yet. Cleared only after that tree write
+        -- succeeds. Not stored. A restart drops the in-memory graph with it.
+        _pendingAlerts = {},
         -- The size dialog for the open alert. Not stored. Closing the alert
         -- or a successful save clears it, so the next oversize edit warns again.
         _sizeWarned = false,
@@ -139,6 +144,10 @@ end
 -- A scope still on the legacy document writes every alert, then the tree, and
 -- does not write the legacy key. An unreadable scope is the caller's job to
 -- refuse before it changes the tree.
+--
+-- A failed alert or tree write keeps the new ids pending. The alert key is
+-- not deleted: the tree has to name it before anything removes it. The next
+-- save of an alert on this scope writes those keys again, then the tree.
 ---@param key string
 ---@param doc Watchdog.Bucket
 ---@param entries Watchdog.Entry[]
@@ -147,18 +156,56 @@ function ScopeEdits:_saveCreated(key, doc, entries)
     if self.store.ScopeStorage(key) ~= "split" then
         return self:_save(key, doc)
     end
+    local ids = self._pendingAlerts[key] or {}
+    local seen = {}
+    for _, id in ipairs(ids) do seen[id] = true end
     for _, entry in ipairs(entries) do
+        if entry ~= nil and entry.id ~= nil and not seen[entry.id] then
+            ids[#ids + 1] = entry.id
+            seen[entry.id] = true
+        end
+    end
+    self._pendingAlerts[key] = ids
+    local ok, reason = self:_writePending(key, doc, nil)
+    if not ok then self:_report(reason) end
+    return ok
+end
+
+-- Pending alert keys, then the scope tree. `entry` is the alert being saved
+-- now, so its graph is the one just edited, not the copy from the failed create.
+-- A true tree write clears the pending ids. A false one leaves them, and leaves
+-- every alert key that was already stored.
+---@param key string
+---@param doc Watchdog.Bucket
+---@param entry Watchdog.Entry|nil
+---@return boolean ok
+---@return "size"|"failed"|nil reason
+---@return boolean treeFailed
+function ScopeEdits:_writePending(key, doc, entry)
+    local ids = self._pendingAlerts[key]
+    if ids == nil then
+        if entry == nil then return true end
+        local ok, reason = self.store.SaveEditedAlert(key, doc, entry)
+        return ok == true, reason, false
+    end
+    local wrote = {}
+    if entry ~= nil then
         local ok, reason = self.store.SaveAlert(key, entry)
-        if not ok then
-            self:_report(reason)
-            return false
+        if not ok then return false, reason, false end
+        wrote[entry.id] = true
+    end
+    for _, id in ipairs(ids) do
+        if not wrote[id] then
+            local pending = self.store.FindById(doc, id)
+            if pending ~= nil and pending.kind == "alert" then
+                local ok, reason = self.store.SaveAlert(key, pending)
+                if not ok then return false, reason, false end
+            end
         end
     end
     local ok, reason = self.store.SaveScope(key, doc)
-    if not ok then
-        self:_report(reason)
-    end
-    return ok
+    if ok then self._pendingAlerts[key] = nil end
+    return ok == true, reason, ok ~= true
 end
 
 -- Flips one Entry. A disabled Group does not flip child alert.enabled; firing
@@ -311,14 +358,15 @@ function ScopeEdits:NoteSaved(scopeKey)
     self._savedEncode = self.store.Encode(doc)
 end
 
--- Closing the alert drops the size warning. The next open can show it again.
+--- Closing the alert drops the size warning. The next open can show it again.
 function ScopeEdits:NoteClosed()
     self._sizeWarned = false
 end
 
 -- Writes the open Alert's graph and Layout into its Bucket, and saves only when
--- that encoding differs from the last successful save. Hiding the shell and
--- shutdown both call this; the caller decides when.
+-- that encoding differs from the last successful save. A create or import whose
+-- tree write failed is not a successful save, so an unchanged close still writes
+-- the tree. Hiding the shell and shutdown both call this; the caller decides when.
 ---@param scopeKey string
 ---@param alertId integer
 ---@param graph LibNodeGraph.Graph
@@ -330,16 +378,29 @@ function ScopeEdits:Autosave(scopeKey, alertId, graph, layout)
     if doc == nil or key == nil then return leave() end
     self.store.UpdateAlertGraph(doc, alertId, graph, layout)
     local encoded = self.store.Encode(doc)
-    if encoded == nil or encoded == self._savedEncode then
+    local treePending = self._pendingAlerts[key] ~= nil
+    if (encoded == nil or encoded == self._savedEncode) and not treePending then
         -- Back to the last saved graph. The next oversize edit warns again.
         self._sizeWarned = false
         return leave()
     end
     local entry = self.store.FindById(doc, alertId)
-    local ok, reason = self.store.SaveEditedAlert(key, doc, entry)
+    local ok, reason, treeFailed
+    if self._pendingAlerts[key] ~= nil and self.store.ScopeStorage(key) == "split" then
+        -- The create or import stored the alert key and then failed the tree.
+        -- This save writes that key again, then the tree that names it.
+        ok, reason, treeFailed = self:_writePending(key, doc, entry)
+    else
+        ok, reason = self.store.SaveEditedAlert(key, doc, entry)
+        if ok then self._pendingAlerts[key] = nil end
+    end
     if ok then
         self._savedEncode = encoded
         self._sizeWarned = false
+    elseif reason == "size" and treeFailed then
+        -- A tree that does not fit warns on every failed save. The alert's
+        -- own size warning stays once per open.
+        self:_report(reason)
     elseif reason == "size" then
         if not self._sizeWarned then
             self._sizeWarned = true
@@ -380,6 +441,9 @@ end
 function ScopeEdits:CreateGroup(scopeKey)
     local doc, key = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave(), nil end
+    -- An unreadable scope key stays as it is. Inserting first would leave
+    -- "New Group" in the empty stand-in after the save refuses to overwrite it.
+    if self.store.ScopeStorage(key) == "unreadable" then return leave(), nil end
     local id = self.store.MintId(doc)
     self.store.InsertEntry(doc, self.store.NewGroupEntry(id, "New Group", true, {}))
     self:_save(key, doc)

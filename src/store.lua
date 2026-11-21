@@ -652,6 +652,7 @@ local tokenDb
 local tokens = {}
 local blocked = {}
 
+---@return table<string, string>
 local function tokenMemory()
     if tokenDb ~= PersistentDB then
         tokenDb = PersistentDB

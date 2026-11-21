@@ -128,6 +128,14 @@ local charScope = nil
 -- The loader runs before the shell exists, and again after login.
 ---@type Watchdog.Shell|nil
 local mux
+
+---@class Watchdog.LoadNotice
+---@field kind "scope"|"save"|"presets"|"alerts"
+---@field reason "size"|"failed"|nil
+---@field name string|nil
+---@field names string[]|nil
+
+---@type Watchdog.LoadNotice[]
 local loadNotices = {}
 
 ---@param unread string[]|nil
@@ -140,8 +148,8 @@ local function queueLoadNotice(unread, problem)
     end
 end
 
--- One dialog per bad scope, and one dialog naming every alert that did not load.
--- Shown when the shell exists. A load that happens first is queued until then.
+--- One dialog per bad scope, and one dialog naming every alert that did not load.
+--- Shown when the shell exists. A load that happens first is queued until then.
 local function presentLoadNotices()
     if mux == nil or #loadNotices == 0 then return end
     local parent = mux:Overlay()

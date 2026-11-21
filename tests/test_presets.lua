@@ -952,6 +952,44 @@ function TestPresets:testRenameWritesOnlyTheIndex()
     luaunit.assertEquals(loaded.presets[1].graph.nodes[1].type, "fixture.trigger")
 end
 
+function TestPresets:testAnUnchangedPresetTokenSkipsTheWrite()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local preset = Presets.Add("Alpha", graph, {})
+    local writes = {}
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes[key] = (writes[key] or 0) + 1
+        return inner(self, key, value)
+    end
+
+    local renamed, err = Presets.Rename(preset.id, "Alpha")
+
+    luaunit.assertNil(err)
+    luaunit.assertEquals(renamed.name, "Alpha")
+    luaunit.assertNil(writes.scope_presets)
+    luaunit.assertNil(writes["scope_presets_" .. preset.id])
+    luaunit.assertEquals(Presets.Load().presets[1].name, "Alpha")
+
+    -- A new database drops the last-written token. The load has to remember
+    -- the token it read, or the same rename writes the index again.
+    local data = PersistentDB.data
+    PersistentDB = newFakePersistentDB()
+    PersistentDB.data = data
+    writes = {}
+    function PersistentDB:SetString(key, value)
+        writes[key] = (writes[key] or 0) + 1
+        return inner(self, key, value)
+    end
+
+    local again, againErr = Presets.Rename(preset.id, "Alpha")
+
+    luaunit.assertNil(againErr)
+    luaunit.assertEquals(again.name, "Alpha")
+    luaunit.assertNil(writes.scope_presets)
+    luaunit.assertNil(writes["scope_presets_" .. preset.id])
+end
+
 function TestPresets:testDeleteWritesTheIndexBeforeThePresetKey()
     local graph = LibNodeGraph.NewGraph(self.registry)
     graph:AddNode("fixture.trigger")
