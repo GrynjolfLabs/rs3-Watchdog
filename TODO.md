@@ -1,3 +1,5 @@
+- [ ] Split scope storage so each alert graph is its own PersistentDB key. Accepted in [ADR 0022](docs/adr/0022-alert-graphs-are-their-own-keys.md). Spec: [#182](https://github.com/GrynjolfLabs/rs3-Watchdog/issues/182). Tickets: [#183](https://github.com/GrynjolfLabs/rs3-Watchdog/issues/183) failed saves stay failed, then [#184](https://github.com/GrynjolfLabs/rs3-Watchdog/issues/184) scope round-trip, then [#185](https://github.com/GrynjolfLabs/rs3-Watchdog/issues/185) migration and presets, then [#186](https://github.com/GrynjolfLabs/rs3-Watchdog/issues/186) edits write only the changed key. Not landed. The running code still writes one JSON document per scope key.
+
 > **Node architecture is being charted as a wayfinder map:**
 > [Wayfinder: Watchdog trigger/action node architecture](https://github.com/adamk33n3r/rs3-Watchdog/issues/1)
 > (GitHub issue #1). The per-node feasibility notes below are the source of truth that map's
