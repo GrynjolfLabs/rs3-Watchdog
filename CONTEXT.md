@@ -126,9 +126,8 @@ _Avoid_: Positions (as a concept name), coordinates, placement, arrangement
 Watchdog's persistence backend (`store.lua`): saves and restores alerts via `PersistentDB`.
 LibNodeGraph never persists (it owns only tables/strings, ADR-0007); the Store is the consumer
 half. It bundles the engine's serialized structure with the UI-only Layout into each alert
-**Entry**. The running code writes a whole Scope's **Entry** tree as one JSON string under its
-**Bucket** key. [ADR 0022](docs/adr/0022-alert-graphs-are-their-own-keys.md) is accepted and not
-landed: the Bucket key keeps the tree, and each Alert's graph and Layout are their own key.
+**Entry**. The Store writes the scope tree apart from each Alert's graph and Layout
+([ADR 0022](docs/adr/0022-alert-graphs-are-their-own-keys.md)). See Bucket.
 The `global` Bucket + Entry tree landed in #86; the persisted
 `current` pointer is gone — the Editor now constructs unbound and the Manager binds it to an alert
 on open (#80/#90), so a reload lands on the Manager. Every Store operation keys on the Entry `id`,
@@ -436,10 +435,7 @@ _Avoid_: Entry id, node id, index, UUID
 The plugin-wide collection of Presets, shown in case-insensitive natural name order. The player
 does not arrange that order. Presets that share a name are listed by Preset id, lower first. A Preset saved on any tab is offered in every Scope, including
 while logged out. Not a Scope, and not a Bucket: Scope still only partitions Entries.
-The instantiated Alert lands in the active Scope. The running code stores the whole library in one PersistentDB key,
-`presets` (no `watchdog_` prefix), beside the Scope Buckets. It is not a field of `global` and
-not stored under any `player_<tracking id>` key, so saving a Scope or switching character does
-not rewrite it. [ADR 0022](docs/adr/0022-alert-graphs-are-their-own-keys.md) splits that library the same way as a Scope, and is not landed: `scope_presets` keeps id, name, and variables, and each Preset's graph and Layout are their own key.
+The instantiated Alert lands in the active Scope. The preset index is `scope_presets` (version 2: id, name, and variables). Each Preset's graph and Layout are `scope_presets_<id>`. The old `presets` value stays on disk and is not written again. The library is not a field of `global` and not stored under any `player_<tracking id>` key, so saving a Scope or switching character does not rewrite it.
 _Avoid_: per-Scope library; Bucket. Starter Alert Presets live on Watchdog's own Pack, not in this library.
 
 **Variable**:
@@ -455,7 +451,7 @@ an Alert fires iff its own `enabled` AND every ancestor Group's `enabled` are tr
 _Avoid_: Folder, category, section; "group" as a verb (that is bulk New-group, #82)
 
 **Bucket**:
-The per-Scope `PersistentDB` key holding one Scope's tree. The running code stores `{ version, entries }` with each Alert's graph and Layout inline: one `global` bucket plus one `player_<tracking id>` bucket per character. [ADR 0022](docs/adr/0022-alert-graphs-are-their-own-keys.md) is accepted and not landed. The scope identity stays `global` or `player_<tracking id>`. The stored tree key becomes `scope_global` or `scope_player_<tracking id>`, version 3, without graphs. Each Alert's graph and Layout are stored apart from that tree. The `global` bucket also holds
+The per-Scope `PersistentDB` key holding one Scope's tree. Callers pass `global` or `player_<tracking id>`. The stored tree key is `scope_global` or `scope_player_<tracking id>`, version 3, without graphs. Each Alert's graph and Layout are their own key. Legacy `global` and numeric `player_<digits>` values stay on disk and are not written again. The `global` tree also holds
 `infoboxAnchor` (the former `current` pointer is no longer persisted — see Level, #80). Keys carry
 **no `watchdog_` prefix** — `PersistentDB` is already plugin-scoped (#81). Scope is not
 a per-Entry field: changing an Entry's Scope moves its subtree across keys (#75, #77, #81).
