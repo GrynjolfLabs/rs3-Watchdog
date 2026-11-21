@@ -77,7 +77,13 @@ local toast = ToastStack.new(effects, {
         if PersistentDB == nil or LibNodeGraph == nil or LibNodeGraph.Json == nil then return end
         local ok, text = pcall(function() return LibNodeGraph.Json.Default.encode(pos) end)
         if ok and text ~= nil then
-            pcall(function() PersistentDB:SetString(TOAST_ANCHOR_KEY, text) end)
+            -- False, nil, and a throw leave the previous bytes. No dialog: this is not a scope save.
+            local setOk, stored = pcall(function()
+                return PersistentDB:SetString(TOAST_ANCHOR_KEY, text)
+            end)
+            if (not setOk or stored ~= true) and log ~= nil then
+                log("Watchdog: toast anchor could not be saved - " .. tostring(stored))
+            end
         end
     end,
 })
@@ -182,10 +188,13 @@ do
         runtime.infobox:SetAnchor(ax, ay)
     end
 end
+local reportFailedSave
 runtime.infobox:SetPersistence({
     SaveAnchor = function(x, y)
         Store.SetInfoBoxAnchor(document, x, y)
-        Store.Save(document)
+        if not Store.Save(document) and reportFailedSave ~= nil then
+            reportFailedSave()
+        end
     end,
 })
 
@@ -305,6 +314,14 @@ local function scopeBucket(scopeKey)
     return nil
 end
 
+reportFailedSave = function()
+    if mux == nil then return end
+    local parent = mux:Overlay()
+    if parent == nil then return end
+    Dialog.failedSave(parent)
+end
+Presets.SetSaveFailed(reportFailedSave)
+
 edits = ScopeEdits.new({
     store = Store,
     runtime = runtime,
@@ -312,6 +329,7 @@ edits = ScopeEdits.new({
     bucket = function(scopeKey)
         return scopeBucket(scopeKey)
     end,
+    onSaveFailed = reportFailedSave,
 })
 
 -- The Scope module returns one result. This applies it. The module does not

@@ -76,7 +76,10 @@ function TestStarterAlerts:setUp()
     PersistentDB = {
         data = { presets = self.presetsSentinel },
         GetString = function(db, key) return db.data[key] end,
-        SetString = function(db, key, value) db.data[key] = value end,
+        SetString = function(db, key, value)
+            db.data[key] = value
+            return true
+        end,
     }
     dofile(mainPath)
     self.packs = Packs.live()

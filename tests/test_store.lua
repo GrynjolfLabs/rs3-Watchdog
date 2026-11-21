@@ -30,7 +30,10 @@ local Node = require("src/ui/node")
 local function newFakePersistentDB()
     local db = { data = {} }
     function db:GetString(key) return self.data[key] end
-    function db:SetString(key, value) self.data[key] = value end
+    function db:SetString(key, value)
+        self.data[key] = value
+        return true
+    end
     function db:Delete(key) self.data[key] = nil end
     return db
 end
@@ -1057,6 +1060,67 @@ function TestStore:testPlaceholderRenameKeepsUnknownNameWithOriginalTypeAndContr
     luaunit.assertEquals(second.graph.nodes[2].unknown.controls.text, "hi")
     luaunit.assertEquals(second.graph.nodes[2].unknown.name, "Enrage callout")
     luaunit.assertNil(second.graph.nodes[2].name)
+end
+
+-- A false return is a refusal. The client leaves the previous bytes, and SaveTo
+-- must not report that as saved.
+function TestStore:testSetStringFalseLeavesThePreviousBytes()
+    local key = "global"
+    local previous = "{\"version\":2,\"entries\":[]}"
+    PersistentDB.data[key] = previous
+    function PersistentDB:SetString()
+        return false
+    end
+
+    local doc = Store.Empty()
+    seedAlert(self, doc, "new", true)
+    luaunit.assertFalse(Store.SaveTo(key, doc))
+    luaunit.assertEquals(PersistentDB:GetString(key), previous)
+end
+
+function TestStore:testSetStringNilLeavesThePreviousBytes()
+    local key = "global"
+    local previous = "{\"version\":2,\"entries\":[]}"
+    PersistentDB.data[key] = previous
+    function PersistentDB:SetString()
+        return nil
+    end
+
+    local doc = Store.Empty()
+    seedAlert(self, doc, "new", true)
+    luaunit.assertFalse(Store.SaveTo(key, doc))
+    luaunit.assertEquals(PersistentDB:GetString(key), previous)
+end
+
+function TestStore:testSetStringThrowLeavesThePreviousBytes()
+    local key = "global"
+    local previous = "{\"version\":2,\"entries\":[]}"
+    PersistentDB.data[key] = previous
+    function PersistentDB:SetString()
+        error("rejected")
+    end
+
+    local doc = Store.Empty()
+    seedAlert(self, doc, "new", true)
+    luaunit.assertFalse(Store.SaveTo(key, doc))
+    luaunit.assertEquals(PersistentDB:GetString(key), previous)
+end
+
+-- A true return is trusted. A later read that disagrees or throws does not
+-- undo the save or turn it into a failure.
+function TestStore:testTrueSetStringIsSavedWithoutReadingItBack()
+    local key = "global"
+    PersistentDB.data[key] = "{\"version\":2,\"entries\":[]}"
+    function PersistentDB:SetString(dbKey, value)
+        self.data[dbKey] = value
+        self.GetString = function() error("read back") end
+        return true
+    end
+
+    local doc = Store.Empty()
+    seedAlert(self, doc, "kept", true)
+    luaunit.assertTrue(Store.SaveTo(key, doc))
+    luaunit.assertStrContains(PersistentDB.data[key], "kept")
 end
 
 return TestStore

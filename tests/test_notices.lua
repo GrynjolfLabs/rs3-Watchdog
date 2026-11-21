@@ -23,6 +23,7 @@ function TestNotices:setUp()
     function self.db:SetString(key, value)
         if self.failSet then error("set failed") end
         self.data[key] = value
+        return true
     end
     PersistentDB = self.db
     self.catalog = {
@@ -197,6 +198,41 @@ function TestNotices:testWindowOpenWhileDialogOpenWaitsAndDoesNotHold()
     luaunit.assertNil(n:OnWindowOpen({ editorTop = true, dialogOpen = true }))
     luaunit.assertFalse(n.hold)
     luaunit.assertNil(n.seen["release:1.1.0"])
+end
+
+function TestNotices:testSetStringFalseStaysSeenAndLeavesThePreviousBytes()
+    local logged = {}
+    _G.log = function(message) logged[#logged + 1] = message end
+    local previous = Json.Default.encode({ "release:1.0.0" })
+    self.db.data[Notices.KEY] = previous
+    local n = self:open({})
+    function self.db:SetString()
+        return false
+    end
+
+    luaunit.assertFalse(n:MarkSeen({ Notices.TIPS_ID }))
+
+    luaunit.assertTrue(n.seen[Notices.TIPS_ID] == true)
+    luaunit.assertEquals(self.db.data[Notices.KEY], previous)
+    luaunit.assertNil(n:OnWindowOpen({ editorTop = true, dialogOpen = false }))
+    luaunit.assertStrContains(logged[1], "seen notices")
+    luaunit.assertNil(logged[1]:find("size", 1, true))
+    luaunit.assertNil(logged[1]:find("too big", 1, true))
+end
+
+function TestNotices:testSetStringNilStaysSeenAndLeavesThePreviousBytes()
+    local previous = Json.Default.encode({ "release:1.0.0" })
+    self.db.data[Notices.KEY] = previous
+    local n = self:open({})
+    function self.db:SetString()
+        return nil
+    end
+
+    luaunit.assertFalse(n:MarkSeen({ Notices.TIPS_ID }))
+
+    luaunit.assertTrue(n.seen[Notices.TIPS_ID] == true)
+    luaunit.assertEquals(self.db.data[Notices.KEY], previous)
+    luaunit.assertNil(n:OnWindowOpen({ editorTop = true, dialogOpen = false }))
 end
 
 function TestNotices:testFailedSaveSuppressesUntilReload()

@@ -127,7 +127,10 @@ end
 local function noteDb()
     local db = { data = {} }
     function db:GetString(key) return self.data[key] end
-    function db:SetString(key, value) self.data[key] = value end
+    function db:SetString(key, value)
+        self.data[key] = value
+        return true
+    end
     PersistentDB = db
     return db
 end
@@ -288,4 +291,41 @@ function TestImportExport:testExportHasFrozenFieldAndDisabledSave()
     luaunit.assertEquals(Dialog.depth(self.parent), 1)
     button(win, "Close").action()
     luaunit.assertEquals(Dialog.depth(self.parent), 0)
+end
+
+function TestImportExport:testFailedTransferNoteLeavesThePreviousBytesAndOnlyLogs()
+    local db = noteDb()
+    local previous = "export\tok=true\told"
+    db.data.transfer_last = previous
+    local logged = {}
+    local savedLog = log
+    log = function(message) logged[#logged + 1] = tostring(message) end
+    local before = #windows
+    function db:SetString()
+        return false
+    end
+
+    ImportExport.noteTransfer("import", true, "Imported 1 alert.")
+
+    log = savedLog
+    luaunit.assertEquals(db.data.transfer_last, previous)
+    luaunit.assertEquals(#windows, before)
+    luaunit.assertStrContains(table.concat(logged, "\n"), "transfer")
+end
+
+function TestImportExport:testNilOrThrownTransferNoteLeavesThePreviousBytes()
+    local db = noteDb()
+    local previous = "export\tok=true\told"
+    db.data.transfer_last = previous
+    function db:SetString()
+        return nil
+    end
+    ImportExport.noteTransfer("import", false, "nope")
+    luaunit.assertEquals(db.data.transfer_last, previous)
+
+    function db:SetString()
+        error("rejected")
+    end
+    ImportExport.noteTransfer("import", false, "nope")
+    luaunit.assertEquals(db.data.transfer_last, previous)
 end

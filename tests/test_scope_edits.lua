@@ -14,7 +14,10 @@ local ScopeEdits = require("src/scope_edits")
 local function newFakePersistentDB()
     local db = { data = {} }
     function db:GetString(key) return self.data[key] end
-    function db:SetString(key, value) self.data[key] = value end
+    function db:SetString(key, value)
+        self.data[key] = value
+        return true
+    end
     function db:Delete(key) self.data[key] = nil end
     return db
 end
@@ -424,6 +427,49 @@ function TestScopeEdits:testAutosaveLeavesACleanGraphAndLayoutUnsaved()
     luaunit.assertEquals(result.kind, "leave")
     luaunit.assertEquals(writes, 0)
     luaunit.assertNil(Store.LoadKey("global").entries[1])
+end
+
+function TestScopeEdits:testFailedReorderLeavesThePreviousBytesAndAsksToTellThePlayer()
+    local first = self:seedAlert("First", true)
+    local second = self:seedAlert("Second", true)
+    luaunit.assertTrue(Store.Save(self.doc))
+    local previous = PersistentDB:GetString("global")
+    local asked = 0
+    self.edits.onSaveFailed = function() asked = asked + 1 end
+    function PersistentDB:SetString()
+        return false
+    end
+
+    self.edits:ReorderSibling("global", second, -1)
+
+    luaunit.assertEquals(asked, 1)
+    luaunit.assertEquals(PersistentDB:GetString("global"), previous)
+    luaunit.assertEquals(self.doc.entries[1].id, second)
+    luaunit.assertEquals(self.doc.entries[2].id, first)
+end
+
+function TestScopeEdits:testFailedEnableKeepsTheFlagAndDoesNotAskToTellThePlayer()
+    local id = self:seedAlert("Gate", true)
+    luaunit.assertTrue(Store.Save(self.doc))
+    local lines = {}
+    log = function(message) lines[#lines + 1] = message end
+    local asked = 0
+    self.edits.onSaveFailed = function() asked = asked + 1 end
+    function PersistentDB:SetString()
+        return false
+    end
+
+    self.edits:ToggleEnabled("global", id)
+    log = nil
+
+    luaunit.assertEquals(asked, 0)
+    luaunit.assertEquals(Store.FindById(self.doc, id).enabled, false)
+    luaunit.assertEquals(self.runtime.alerts[1].enabled, false)
+    luaunit.assertTrue(Store.LoadKey("global").entries[1].enabled)
+    luaunit.assertEquals(#lines, 1)
+    luaunit.assertStrContains(lines[1], "failed to save")
+    luaunit.assertNil(lines[1]:find("size", 1, true))
+    luaunit.assertNil(lines[1]:find("too big", 1, true))
 end
 
 function TestScopeEdits:testReorderSiblingSavesTheNewOrder()

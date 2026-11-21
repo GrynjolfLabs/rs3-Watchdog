@@ -183,7 +183,10 @@ end
 function TestMainTiming:testUnreadableCharacterBucketStaysOnDisk()
     local db = { data = { player_42 = "{not-json" } }
     function db:GetString(key) return self.data[key] end
-    function db:SetString(key, value) self.data[key] = value end
+    function db:SetString(key, value)
+        self.data[key] = value
+        return true
+    end
     local lines = {}
     log = function(message) lines[#lines + 1] = tostring(message) end
     self:reloadWithPlayer(42, db)
@@ -206,7 +209,10 @@ end
 function TestMainTiming:testMissingCharacterBucketIsEmptyAndUnwritten()
     local db = { data = {} }
     function db:GetString(key) return self.data[key] end
-    function db:SetString(key, value) self.data[key] = value end
+    function db:SetString(key, value)
+        self.data[key] = value
+        return true
+    end
     self:reloadWithPlayer(7, db)
 
     luaunit.assertNil(db.data.player_7)
@@ -215,6 +221,33 @@ function TestMainTiming:testMissingCharacterBucketIsEmptyAndUnwritten()
         if alert.bucketKey == "player_7" then count = count + 1 end
     end
     luaunit.assertEquals(count, 0)
+end
+
+function TestMainTiming:testFailedToastAnchorWriteLeavesThePreviousBytesAndOnlyLogs()
+    local previous = "{\"dx\":4,\"dy\":5}"
+    local data = { watchdog_toast_anchor = previous }
+    local logged = {}
+    local windows = 0
+    log = function(message) logged[#logged + 1] = tostring(message) end
+    prettyui = {
+        Window = {
+            new = function()
+                windows = windows + 1
+                return {}
+            end,
+        },
+    }
+    PersistentDB = {
+        data = data,
+        GetString = function(self, key) return self.data[key] end,
+        SetString = function() return false end,
+    }
+
+    self.runtime.toast:ResetAnchor()
+
+    luaunit.assertEquals(data.watchdog_toast_anchor, previous)
+    luaunit.assertEquals(windows, 0)
+    luaunit.assertStrContains(table.concat(logged, "\n"), "toast")
 end
 
 function TestMainTiming:testDurationIsIndependentOfFrameRate()

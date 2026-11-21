@@ -26,6 +26,7 @@ local PresetCopy = require("src/preset_copy")
 ---@field runtime table
 ---@field registry LibNodeGraph.Registry|nil
 ---@field lookup (fun(scopeKey: string): Watchdog.Bucket|nil, string|nil, Watchdog.RestoredAlert[]|nil)|nil
+---@field onSaveFailed fun()|nil
 ---@field _savedEncode string|nil
 local ScopeEdits = {}
 ScopeEdits.__index = ScopeEdits
@@ -87,7 +88,7 @@ local function collectAlertIds(entry, out)
     end
 end
 
----@param deps { store: table, runtime: table, registry: LibNodeGraph.Registry|nil, bucket: fun(scopeKey: string): Watchdog.Bucket|nil, string|nil, Watchdog.RestoredAlert[]|nil }
+---@param deps { onSaveFailed: fun()|nil, store: table, runtime: table, registry: LibNodeGraph.Registry|nil, bucket: fun(scopeKey: string): Watchdog.Bucket|nil, string|nil, Watchdog.RestoredAlert[]|nil }
 ---@return Watchdog.ScopeEdits
 function ScopeEdits.new(deps)
     return setmetatable({
@@ -95,6 +96,7 @@ function ScopeEdits.new(deps)
         runtime = deps.runtime,
         registry = deps.registry,
         lookup = deps.bucket,
+        onSaveFailed = deps.onSaveFailed,
         _savedEncode = nil,
     }, ScopeEdits)
 end
@@ -106,6 +108,18 @@ end
 function ScopeEdits:_bucket(scopeKey)
     if self.lookup == nil then return nil end
     return self.lookup(scopeKey)
+end
+
+-- Enable does not use this. A refused write tells the player; the bytes stay as they were.
+---@param key string
+---@param doc Watchdog.Bucket
+---@return boolean
+function ScopeEdits:_save(key, doc)
+    local ok = self.store.SaveTo(key, doc) == true
+    if not ok and self.onSaveFailed ~= nil then
+        self.onSaveFailed()
+    end
+    return ok
 end
 
 -- Flips one Entry. A disabled Group does not flip child alert.enabled; firing
@@ -157,7 +171,7 @@ function ScopeEdits:Rename(scopeKey, id, name, open)
     if entryBefore == nil or not self.store.SetName(doc, id, name) then return leave(), false end
     -- SetName drops client text tags. The runtime and the editor title use that stored name.
     local storedName = entryBefore.name
-    if not self.store.SaveTo(key, doc) then
+    if not self:_save(key, doc) then
         entryBefore.name = oldName
         return leave(), false
     end
@@ -190,7 +204,7 @@ function ScopeEdits:Delete(scopeKey, id, open)
     local closing = self:_closing(entry, key, open)
     if closing then self:_flushOpen(open) end
     self.store.DeleteById(doc, id)
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     for _, alertId in ipairs(alertIds) do
         self.runtime:ReleaseAlertVisuals(alertId, key)
         self.runtime:RemoveAlert(alertId, key)
@@ -226,7 +240,7 @@ function ScopeEdits:CreateFromScratch(scopeKey)
     local id = self.store.MintId(doc)
     local name = "New Alert"
     self.store.InsertEntry(doc, self.store.NewAlertEntry(id, name, graph, layout, true))
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     rememberAlert(list, id, name, graph, layout)
     self.runtime:AddAlert(id, name, graph, true, key, self.store.FindById(doc, id))
     return openEditor(scopeKey, id), id
@@ -259,7 +273,7 @@ function ScopeEdits:Autosave(scopeKey, alertId, graph, layout)
     self.store.UpdateAlertGraph(doc, alertId, graph, layout)
     local encoded = self.store.Encode(doc)
     if encoded ~= nil and encoded ~= self._savedEncode then
-        if self.store.SaveTo(key, doc) then
+        if self:_save(key, doc) then
             self._savedEncode = encoded
         end
     end
@@ -274,7 +288,7 @@ function ScopeEdits:ReorderSibling(scopeKey, id, delta)
     local doc, key = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave() end
     if not self.store.ReorderSibling(doc, id, delta) then return leave() end
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     return leave()
 end
 
@@ -285,7 +299,7 @@ function ScopeEdits:Lift(scopeKey, id)
     local doc, key = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave() end
     if not self.store.LiftEntry(doc, id) then return leave() end
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     return leave()
 end
 
@@ -297,7 +311,7 @@ function ScopeEdits:CreateGroup(scopeKey)
     if doc == nil or key == nil then return leave(), nil end
     local id = self.store.MintId(doc)
     self.store.InsertEntry(doc, self.store.NewGroupEntry(id, "New Group", true, {}))
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     return leave(), id
 end
 
@@ -345,7 +359,7 @@ function ScopeEdits:BulkDelete(scopeKey, ids, open)
             if list ~= nil then purgeAlertList(list, alertIds) end
         end
     end
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     if closing then return { kind = "close" } end
     return leave()
 end
@@ -359,7 +373,7 @@ function ScopeEdits:BulkNewGroup(scopeKey, ids)
     if doc == nil or key == nil or ids == nil or #ids == 0 then return leave(), nil end
     local newId = self.store.GroupSelected(doc, ids, "New Group")
     if newId == nil then return leave(), nil end
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     return leave(), newId
 end
 
@@ -426,8 +440,8 @@ function ScopeEdits:BulkMove(scopeKey, destScopeKey, ids, open)
             end
         end
     end
-    self.store.SaveTo(srcKey, srcDoc)
-    self.store.SaveTo(destKey, destDoc)
+    self:_save(srcKey, srcDoc)
+    self:_save(destKey, destDoc)
     if closing then return { kind = "close" } end
     return leave()
 end
@@ -472,7 +486,7 @@ function ScopeEdits:ImportJson(scopeKey, text)
     if not ok then
         return leave(), false, report
     end
-    self.store.SaveTo(key, doc)
+    local saved = self:_save(key, doc)
     local newLeaves = {}
     for _, leaf in ipairs(self.store.Leaves(doc)) do
         if not before[leaf.id] then
@@ -489,6 +503,9 @@ function ScopeEdits:ImportJson(scopeKey, text)
             end
             self.runtime:AddAlert(alert.id, alert.name, alert.graph, alert.enabled ~= false, key, self.store.FindById(doc, alert.id))
         end
+    end
+    if not saved then
+        return leave(), false, "Could not save the import."
     end
     return leave(), true, report
 end
@@ -510,7 +527,7 @@ function ScopeEdits:_finishCreate(scopeKey, doc, key, list, entry, graph, layout
     if entry == nil or graph == nil or layout == nil then
         return leave(), nil, err
     end
-    self.store.SaveTo(key, doc)
+    self:_save(key, doc)
     rememberAlert(list, entry.id, entry.name, graph, layout)
     self.runtime:AddAlert(entry.id, entry.name, graph, true, key, entry)
     return openEditor(scopeKey, entry.id), entry.id, nil

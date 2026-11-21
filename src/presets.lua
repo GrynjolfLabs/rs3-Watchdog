@@ -21,6 +21,7 @@ local MARKABLE_WIDGET = {
 
 local DB_KEY = "presets"
 local DOC_VERSION = 1
+local onSaveFailed
 -- Blank and longer-than-this names are refused. Pack Alert Presets use this same cap.
 Presets.NAME_MAX = 80
 local NAME_MAX = Presets.NAME_MAX
@@ -140,21 +141,39 @@ local function mintId(doc)
     return maxId + 1
 end
 
+---@param detail string
+---@return boolean
+local function failSave(detail)
+    report(detail)
+    if onSaveFailed ~= nil then onSaveFailed() end
+    return false
+end
+
 ---@param doc Watchdog.PresetDoc
 ---@return boolean
 local function write(doc)
-    if PersistentDB == nil then return false end
+    if PersistentDB == nil then return failSave("failed to save presets document - no PersistentDB") end
     local c = codec()
     if c == nil then
-        report("failed to encode presets document - no JSON codec")
-        return false
+        return failSave("failed to encode presets document - no JSON codec")
     end
     local ok, text = pcall(function() return c.encode(doc) end)
     if not ok or type(text) ~= "string" then
-        report("failed to encode presets document - " .. tostring(text))
-        return false
+        return failSave("failed to encode presets document - " .. tostring(text))
     end
-    return pcall(function() PersistentDB:SetString(DB_KEY, text) end)
+    -- False, nil, and a throw leave the previous bytes. A true return is the save.
+    local stored
+    ok, stored = pcall(function() return PersistentDB:SetString(DB_KEY, text) end)
+    if not ok or stored ~= true then
+        return failSave("failed to save presets document - " .. tostring(stored))
+    end
+    return true
+end
+
+-- main points this at the save-failed message dialog. Tests replace it.
+---@param fn fun()|nil
+function Presets.SetSaveFailed(fn)
+    onSaveFailed = fn
 end
 
 ---@param nodeId integer

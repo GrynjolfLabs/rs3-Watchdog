@@ -355,6 +355,7 @@ function TestPacks:testAcceptedAlertPresetCopiesTheSnapshotAndSkipsThePresetLibr
         SetString = function(self, key, value)
             writes = writes + 1
             self.data[key] = value
+            return true
         end,
     }
     local graph = { nodes = { { type = "action.popup", body = "Hello" } } }

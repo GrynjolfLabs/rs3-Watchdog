@@ -379,4 +379,20 @@ function Dialog.resizeKeepingTop(win, width, height)
     end
 end
 
+-- A refused alert, preset, or scope save. Not a size refusal: that dialog is separate.
+---@param parent any
+---@return any|nil window
+function Dialog.failedSave(parent)
+    return Dialog.mount(parent, {
+        title = "Could not save",
+        width = 420,
+        height = 180,
+        content = function(win)
+            win:AddText("Watchdog could not save that change.")
+            win:AddText("The last saved copy is still there.")
+        end,
+        actions = { { label = "Close" } },
+    })
+end
+
 return Dialog

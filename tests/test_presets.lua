@@ -24,7 +24,10 @@ require("src/nodes/actions/screen_marker")
 local function newFakePersistentDB()
     local db = { data = {} }
     function db:GetString(key) return self.data[key] end
-    function db:SetString(key, value) self.data[key] = value end
+    function db:SetString(key, value)
+        self.data[key] = value
+        return true
+    end
     function db:Delete(key) self.data[key] = nil end
     return db
 end
@@ -97,9 +100,11 @@ function TestPresets:setUp()
         run = function() end,
     })
     PersistentDB = newFakePersistentDB()
+    Presets.SetSaveFailed(nil)
 end
 
 function TestPresets:tearDown()
+    Presets.SetSaveFailed(nil)
     PersistentDB = nil
 end
 
@@ -818,4 +823,60 @@ function TestPresets:testDeleteOfTheLastPresetLeavesAnEmptyLibrary()
     local listed, err = Presets.List()
     luaunit.assertNil(err)
     luaunit.assertEquals(listed, {})
+end
+
+function TestPresets:testSetStringFalseLeavesThePreviousPresetBytes()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    local first = Presets.Add("Kept", graph, {})
+    luaunit.assertNotNil(first)
+    local previous = PersistentDB:GetString("presets")
+    function PersistentDB:SetString()
+        return false
+    end
+
+    local second, err = Presets.Add("New", graph, {})
+
+    luaunit.assertNil(second)
+    luaunit.assertEquals(err, "Could not save the preset.")
+    luaunit.assertEquals(PersistentDB:GetString("presets"), previous)
+end
+
+function TestPresets:testSetStringNilOrThrowLeavesThePreviousPresetBytes()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    luaunit.assertNotNil(Presets.Add("Kept", graph, {}))
+    local previous = PersistentDB:GetString("presets")
+
+    function PersistentDB:SetString()
+        return nil
+    end
+    local added = Presets.Add("Nil", graph, {})
+    luaunit.assertNil(added)
+    luaunit.assertEquals(PersistentDB:GetString("presets"), previous)
+
+    function PersistentDB:SetString()
+        error("rejected")
+    end
+    added = Presets.Add("Thrown", graph, {})
+    luaunit.assertNil(added)
+    luaunit.assertEquals(PersistentDB:GetString("presets"), previous)
+end
+
+function TestPresets:testFailedPresetSaveAsksToTellThePlayer()
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    luaunit.assertNotNil(Presets.Add("Kept", graph, {}))
+    local asked = 0
+    Presets.SetSaveFailed(function() asked = asked + 1 end)
+    function PersistentDB:SetString()
+        return false
+    end
+
+    luaunit.assertNil(Presets.Add("New", graph, {}))
+    luaunit.assertEquals(asked, 1)
+
+    asked = 0
+    luaunit.assertNil(Presets.Add("   ", graph, {}))
+    luaunit.assertEquals(asked, 0)
 end

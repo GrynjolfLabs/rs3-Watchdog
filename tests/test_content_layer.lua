@@ -448,7 +448,10 @@ function TestContentLayer:testEmptyShellKeyStaysEmpty()
     _G.GameKey = { F8 = 66 }
     _G.PersistentDB = {
         GetString = function(_, key) return store[key] end,
-        SetString = function(_, key, value) store[key] = value end,
+        SetString = function(_, key, value)
+            store[key] = value
+            return true
+        end,
     }
     _G.LibNodeGraph = { Json = require("json") }
     HubLayers.LoadPrefs(true)
@@ -459,6 +462,38 @@ function TestContentLayer:testEmptyShellKeyStaysEmpty()
     HubLayers.SetPositionsLocked(true)
     HubLayers.LoadPrefs(true)
     luaunit.assertTrue(HubLayers.PositionsLocked())
+end
+
+function TestContentLayer:testFailedShellKeyWriteLeavesThePreviousBytesAndOnlyLogs()
+    local store = { watchdog_shell_key = "[66]" }
+    local logged = {}
+    local windows = 0
+    local savedLog = log
+    local savedPretty = prettyui
+    log = function(message) logged[#logged + 1] = tostring(message) end
+    prettyui = {
+        Window = {
+            new = function()
+                windows = windows + 1
+                return {}
+            end,
+        },
+    }
+    _G.GameKey = { F8 = 66 }
+    _G.PersistentDB = {
+        GetString = function(_, key) return store[key] end,
+        SetString = function() return false end,
+    }
+    _G.LibNodeGraph = { Json = require("json") }
+
+    HubLayers.LoadPrefs(true)
+    HubLayers.SetShellKeys({})
+
+    log = savedLog
+    prettyui = savedPretty
+    luaunit.assertEquals(store.watchdog_shell_key, "[66]")
+    luaunit.assertEquals(windows, 0)
+    luaunit.assertStrContains(table.concat(logged, "\n"), "watchdog_shell_key")
 end
 
 function TestContentLayer:testRestrictedAreasIsARequiredDependency()

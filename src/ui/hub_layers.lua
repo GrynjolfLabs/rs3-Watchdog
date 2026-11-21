@@ -90,9 +90,17 @@ end
 
 local function writeString(key, value)
     if PersistentDB == nil then return end
-    pcall(function()
-        PersistentDB:SetString(key, value)
+    -- False, nil, and a throw leave the previous bytes. No dialog: these are not scope saves.
+    local setOk, stored = pcall(function()
+        return PersistentDB:SetString(key, value)
     end)
+    if not setOk or stored ~= true then
+        if log ~= nil then
+            log("Watchdog: could not save " .. tostring(key) .. " - " .. tostring(stored))
+        end
+        return false
+    end
+    return true
 end
 
 -- Missing shell-key text means F8. A saved empty list means the shell key is off.

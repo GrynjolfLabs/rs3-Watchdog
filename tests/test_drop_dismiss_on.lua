@@ -240,7 +240,10 @@ local PresetCopy = require("src/preset_copy")
 local function fakeDb()
     local db = { data = {} }
     function db:GetString(key) return self.data[key] end
-    function db:SetString(key, value) self.data[key] = value end
+    function db:SetString(key, value)
+        self.data[key] = value
+        return true
+    end
     return db
 end
 

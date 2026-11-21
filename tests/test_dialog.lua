@@ -336,6 +336,20 @@ end
 
 TestConfirmWrapper = {}
 
+function TestDialog:testFailedSaveMessageDoesNotCallItASizeProblem()
+    local win = Dialog.failedSave(self.parent)
+    luaunit.assertEquals(win.title, "Could not save")
+    luaunit.assertEquals(win.texts, {
+        "Watchdog could not save that change.",
+        "The last saved copy is still there.",
+    })
+    luaunit.assertEquals(#win.buttons, 1)
+    luaunit.assertEquals(win.buttons[1].label, "Close")
+    local body = table.concat(win.texts, " ")
+    luaunit.assertNil(body:find("size", 1, true))
+    luaunit.assertNil(body:find("too big", 1, true))
+end
+
 function TestConfirmWrapper:setUp()
     self._savedUi = _G.ui
     self._savedPretty = _G.prettyui

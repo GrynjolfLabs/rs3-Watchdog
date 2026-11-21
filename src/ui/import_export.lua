@@ -13,11 +13,16 @@ local ImportExport = {}
 ---@param ok boolean
 ---@param detail string|nil
 function ImportExport.noteTransfer(kind, ok, detail)
-    pcall(function()
-        if PersistentDB == nil then return end
-        PersistentDB:SetString("transfer_last", string.format(
-            "%s\tok=%s\t%s", kind, tostring(ok), tostring(detail):sub(1, 500)))
+    if PersistentDB == nil then return end
+    local text = string.format(
+        "%s\tok=%s\t%s", kind, tostring(ok), tostring(detail):sub(1, 500))
+    -- False, nil, and a throw leave the previous bytes. No dialog: a transfer note is not a scope save.
+    local setOk, stored = pcall(function()
+        return PersistentDB:SetString("transfer_last", text)
     end)
+    if (not setOk or stored ~= true) and log ~= nil then
+        log("Watchdog: transfer note could not be saved - " .. tostring(stored))
+    end
 end
 
 -- InputField hard cap (#83); Manager passes Export.MAX_BYTES. Kept here so the wrapper
