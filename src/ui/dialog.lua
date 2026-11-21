@@ -395,4 +395,63 @@ function Dialog.failedSave(parent)
     })
 end
 
+-- A token over the PersistentDB cap. The same dialog covers an alert, a
+-- scope tree, and a preset. It is not the generic failed-save dialog.
+---@param parent any
+---@return any|nil window
+function Dialog.tooBig(parent)
+    return Dialog.mount(parent, {
+        title = "Too big to save",
+        width = 420,
+        height = 180,
+        content = function(win)
+            win:AddText("That change is too big to save.")
+            win:AddText("The last saved copy is still there.")
+        end,
+        actions = { { label = "Close" } },
+    })
+end
+
+-- One dialog for every alert whose key was missing or unreadable. The row
+-- stays in the tree. Naming it here is how the player finds that row.
+---@param parent any
+---@param names string[]
+---@return any|nil window
+function Dialog.unreadAlerts(parent, names)
+    return Dialog.mount(parent, {
+        title = "Could not load",
+        width = 420,
+        height = 180,
+        content = function(win)
+            if names == nil or #names ~= 1 then
+                win:AddText("These alerts did not load. The saved copies are still there.")
+                for _, name in ipairs(names or {}) do
+                    win:AddText(name)
+                end
+            else
+                win:AddText("Could not load " .. names[1] .. ".")
+                win:AddText("The saved copy is still there.")
+            end
+        end,
+        actions = { { label = "Close" } },
+    })
+end
+
+-- The new scope key is present and this build cannot use it. The legacy
+-- document is not a fallback, and nothing may write over the bad key.
+---@param parent any
+---@return any|nil window
+function Dialog.scopeUnreadable(parent)
+    return Dialog.mount(parent, {
+        title = "Could not load",
+        width = 420,
+        height = 180,
+        content = function(win)
+            win:AddText("This scope could not be read.")
+            win:AddText("Nothing was written over the saved copy.")
+        end,
+        actions = { { label = "Close" } },
+    })
+end
+
 return Dialog

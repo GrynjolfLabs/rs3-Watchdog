@@ -124,9 +124,44 @@ runtime:SetRegistry(registry)
 ---@type { key: string, displayName: string, doc: Watchdog.Bucket, alerts: Watchdog.RestoredAlert[] }|nil
 local charScope = nil
 
+-- Declared up here so the bucket loader and the shell share one variable.
+-- The loader runs before the shell exists, and again after login.
+---@type Watchdog.Shell|nil
+local mux
+local loadNotices = {}
+
+---@param unread string[]|nil
+---@param problem "unreadable"|nil
+local function queueLoadNotice(unread, problem)
+    if problem == "unreadable" then
+        loadNotices[#loadNotices + 1] = { kind = "scope" }
+    elseif type(unread) == "table" and #unread > 0 then
+        loadNotices[#loadNotices + 1] = { kind = "alerts", names = unread }
+    end
+end
+
+-- One dialog per bad scope, and one dialog naming every alert that did not load.
+-- Shown when the shell exists. A load that happens first is queued until then.
+local function presentLoadNotices()
+    if mux == nil or #loadNotices == 0 then return end
+    local parent = mux:Overlay()
+    if parent == nil then return end
+    local pending = loadNotices
+    loadNotices = {}
+    for _, item in ipairs(pending) do
+        if item.kind == "scope" then
+            Dialog.scopeUnreadable(parent)
+        else
+            Dialog.unreadAlerts(parent, item.names)
+        end
+    end
+end
+
 runtime:SetBucketLoader(function(trackingId)
     local key = Store.PlayerKey(trackingId)
-    local playerDoc = Store.LoadKey(key)
+    local playerDoc, unread, problem = Store.LoadScope(key)
+    queueLoadNotice(unread, problem)
+    presentLoadNotices()
     local restoredChar = {}
     local ok, r = pcall(function() return Store.RestoreAll(playerDoc, registry) end)
     if ok and r ~= nil then restoredChar = r end
@@ -137,7 +172,8 @@ runtime:SetBucketLoader(function(trackingId)
     return restoredChar
 end)
 
-local document = Store.LoadKey("global")
+local document, globalUnread, globalProblem = Store.LoadScope("global")
+queueLoadNotice(globalUnread, globalProblem)
 
 local restored = {}
 do
@@ -233,7 +269,6 @@ local boundScope = nil
 local persistNow -- assigned below
 local edits ---@type Watchdog.ScopeEdits
 
-local mux ---@type Watchdog.Shell
 local managerSurface ---@type Watchdog.MuxSurface
 local editorSurface ---@type Watchdog.MuxSurface
 local manager
@@ -265,6 +300,7 @@ end
 
 local function onShellShow()
     if mux == nil then return end
+    presentLoadNotices()
     presentNotice(notices:OnWindowOpen({
         editorTop = mux:IsTop("editor"),
         dialogOpen = overlayHasDialog(),
@@ -277,6 +313,9 @@ local function navOpenAlert(scopeKey, entryId)
     local a = resolveAlert(scopeKey, entryId)
     if a == nil then return end
     local entry = Store.FindById(a.doc, entryId)
+    -- A missing or unreadable alert key is not in the restored list, so this
+    -- does not open. A row with no graph must not replace the stored bytes.
+    if entry == nil or type(entry.graph) ~= "table" then return end
     editor:BindEntry(entryId, a.graph, a.layout, entry and entry.name)
     boundScope = { doc = a.doc, key = a.key }
     edits:NoteSaved(a.key)
@@ -314,11 +353,15 @@ local function scopeBucket(scopeKey)
     return nil
 end
 
-reportFailedSave = function()
+reportFailedSave = function(reason)
     if mux == nil then return end
     local parent = mux:Overlay()
     if parent == nil then return end
-    Dialog.failedSave(parent)
+    if reason == "size" then
+        Dialog.tooBig(parent)
+    else
+        Dialog.failedSave(parent)
+    end
 end
 Presets.SetSaveFailed(reportFailedSave)
 
@@ -555,6 +598,7 @@ mux = Shell.new({
         HubLayers.SetShellOpen(false)
     end,
 })
+presentLoadNotices()
 editor.onAlertNameChanged = function()
     mux:SyncTitle()
 end

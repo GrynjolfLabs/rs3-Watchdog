@@ -122,6 +122,38 @@ function ScopeEdits:_save(key, doc)
     return ok
 end
 
+---@param reason string|nil
+function ScopeEdits:_report(reason)
+    if self.onSaveFailed ~= nil then
+        self.onSaveFailed(reason)
+    end
+end
+
+-- A scope already on the new keys writes each alert, then the tree. A legacy
+-- scope still writes the old document. An unreadable scope is the caller's
+-- job to refuse before it changes the tree.
+---@param key string
+---@param doc Watchdog.Bucket
+---@param entries Watchdog.Entry[]
+---@return boolean
+function ScopeEdits:_saveCreated(key, doc, entries)
+    if self.store.ScopeStorage(key) ~= "split" then
+        return self:_save(key, doc)
+    end
+    for _, entry in ipairs(entries) do
+        local ok, reason = self.store.SaveAlert(key, entry)
+        if not ok then
+            self:_report(reason)
+            return false
+        end
+    end
+    local ok, reason = self.store.SaveScope(key, doc)
+    if not ok then
+        self:_report(reason)
+    end
+    return ok
+end
+
 -- Flips one Entry. A disabled Group does not flip child alert.enabled; firing
 -- stops through the ancestor check, so this only releases visuals those children
 -- already spawned. An Alert's own flag is what the runtime reads.
@@ -131,6 +163,7 @@ end
 function ScopeEdits:ToggleEnabled(scopeKey, id)
     local doc, key = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave() end
+    if self.store.ScopeStorage(key) == "unreadable" then return leave() end
     local entry = self.store.FindById(doc, id)
     if entry == nil then return leave() end
     local nextEnabled = not (entry.enabled ~= false)
@@ -197,6 +230,7 @@ end
 function ScopeEdits:Delete(scopeKey, id, open)
     local doc, key, list = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave() end
+    if self.store.ScopeStorage(key) == "unreadable" then return leave() end
     local entry = self.store.FindById(doc, id)
     if entry == nil then return leave() end
     local alertIds = {}
@@ -235,12 +269,15 @@ end
 function ScopeEdits:CreateFromScratch(scopeKey)
     local doc, key, list = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave(), nil end
+    if self.store.ScopeStorage(key) == "unreadable" then return leave(), nil end
     local graph = LibNodeGraph.NewGraph(self.registry)
     local layout = {}
     local id = self.store.MintId(doc)
     local name = "New Alert"
     self.store.InsertEntry(doc, self.store.NewAlertEntry(id, name, graph, layout, true))
-    self:_save(key, doc)
+    -- FindById also returns the sibling list. A local keeps the entry alone.
+    local entry = self.store.FindById(doc, id)
+    self:_saveCreated(key, doc, { entry })
     rememberAlert(list, id, name, graph, layout)
     self.runtime:AddAlert(id, name, graph, true, key, self.store.FindById(doc, id))
     return openEditor(scopeKey, id), id
@@ -341,6 +378,7 @@ end
 function ScopeEdits:BulkDelete(scopeKey, ids, open)
     local doc, key, list = self:_bucket(scopeKey)
     if doc == nil or key == nil or ids == nil then return leave() end
+    if self.store.ScopeStorage(key) == "unreadable" then return leave() end
     local closing = false
     for _, id in ipairs(ids) do
         local entry = self.store.FindById(doc, id)
@@ -386,6 +424,9 @@ function ScopeEdits:BulkMove(scopeKey, destScopeKey, ids, open)
     local srcDoc, srcKey, srcList = self:_bucket(scopeKey)
     local destDoc, destKey, destList = self:_bucket(destScopeKey)
     if srcDoc == nil or destDoc == nil or srcKey == nil or destKey == nil or ids == nil then
+        return leave()
+    end
+    if self.store.ScopeStorage(srcKey) == "unreadable" or self.store.ScopeStorage(destKey) == "unreadable" then
         return leave()
     end
     local closing = false
@@ -482,17 +523,20 @@ function ScopeEdits:ImportJson(scopeKey, text)
     for _, leaf in ipairs(self.store.Leaves(doc)) do
         before[leaf.id] = true
     end
+    if self.store.ScopeStorage(key) == "unreadable" then
+        return leave(), false, "Could not save the import."
+    end
     local ok, report = Export.Import(doc, text, { registry = self.registry })
     if not ok then
         return leave(), false, report
     end
-    local saved = self:_save(key, doc)
     local newLeaves = {}
     for _, leaf in ipairs(self.store.Leaves(doc)) do
         if not before[leaf.id] then
             newLeaves[#newLeaves + 1] = leaf
         end
     end
+    local saved = self:_saveCreated(key, doc, newLeaves)
     if #newLeaves > 0 then
         local temp = self.store.Empty()
         temp.entries = newLeaves
@@ -527,7 +571,10 @@ function ScopeEdits:_finishCreate(scopeKey, doc, key, list, entry, graph, layout
     if entry == nil or graph == nil or layout == nil then
         return leave(), nil, err
     end
-    self:_save(key, doc)
+    if self.store.ScopeStorage(key) == "unreadable" then
+        return leave(), nil, "This scope could not be read."
+    end
+    self:_saveCreated(key, doc, { entry })
     rememberAlert(list, entry.id, entry.name, graph, layout)
     self.runtime:AddAlert(entry.id, entry.name, graph, true, key, entry)
     return openEditor(scopeKey, entry.id), entry.id, nil
@@ -542,6 +589,9 @@ end
 function ScopeEdits:CreateFromPreset(scopeKey, presetId, answers)
     local doc, key, list = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave(), nil, "No scope to create the alert in." end
+    if self.store.ScopeStorage(key) == "unreadable" then
+        return leave(), nil, "This scope could not be read."
+    end
     return self:_finishCreate(scopeKey, doc, key, list, PresetCopy.Instantiate(doc, presetId, self.registry, answers))
 end
 
@@ -556,6 +606,9 @@ end
 function ScopeEdits:CreateFromAlertPreset(scopeKey, snapshot, answers)
     local doc, key, list = self:_bucket(scopeKey)
     if doc == nil or key == nil then return leave(), nil, "No scope to create the alert in." end
+    if self.store.ScopeStorage(key) == "unreadable" then
+        return leave(), nil, "This scope could not be read."
+    end
     return self:_finishCreate(scopeKey, doc, key, list, PresetCopy.InstantiateSnapshot(doc, snapshot, self.registry, answers))
 end
 

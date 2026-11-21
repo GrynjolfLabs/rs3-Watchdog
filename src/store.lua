@@ -3,6 +3,11 @@
 -- One Bucket per scope: `{ version, entries, infoboxAnchor }` under an un-prefixed key
 -- (`global` or `player_<tracking id>` - PersistentDB is already plugin-scoped).
 --
+-- A scope that has already moved to its own key keeps the tree at `scope_global` or
+-- `scope_player_<tracking id>` and each alert graph at `..._alert_<id>`. Those values
+-- are WD1 tokens. Callers still pass the scope identity. This module maps it to the
+-- stored name. A scope with no new key still uses the un-prefixed document.
+--
 -- `id` is identity: every op keys on `id`, never `name` (display text, not unique). Alerts
 -- carry Serialize `graph` + `layout`; groups carry `children`. Layout is an array of
 -- `{ id, x, y }` because JSON object keys must be strings; it round-trips to a nodeId-keyed
@@ -11,6 +16,7 @@
 local Util = require("src/util")
 local Text = require("src/text")
 local DropDismissOn = require("src/drop_dismiss_on")
+local Compress = require("src/compress")
 
 local Store = {}
 
@@ -622,6 +628,397 @@ end
 ---@return boolean  # true if the document was encoded and written
 function Store.Save(doc)
     return Store.SaveTo(DB_KEY, doc)
+end
+
+--- Split keys -------------------------------------------------------------------------------
+-- Document versions sit inside the JSON, after WD1 is removed. The scope tree is
+-- version 3. An alert key is version 1 and the graph keeps the version Serialize wrote.
+-- pairs() order is not stable across two tables with the same fields, so the token
+-- is encoded with sorted object keys. An unchanged save compares that token.
+
+local SCOPE_DOC_VERSION = 3
+local ALERT_DOC_VERSION = 1
+
+-- PersistentDB leaves the previous bytes when the value is longer than this.
+-- The cap is the stored WD1 token, not the JSON. Refuse before SetString so
+-- there is no raw JSON fallback and the caller can say it is too big.
+local STORED_TOKEN_CAP = 131070
+
+-- Last token read or written for a key. Compared before SetString so an
+-- unchanged save does not write. Tied to the PersistentDB value so a test
+-- that swaps the database does not skip a write that never happened.
+local tokenDb
+local tokens = {}
+local blocked = {}
+
+local function tokenMemory()
+    if tokenDb ~= PersistentDB then
+        tokenDb = PersistentDB
+        tokens = {}
+        blocked = {}
+    end
+    return tokens
+end
+
+---@param storageKey string
+local function blockKey(storageKey)
+    tokenMemory()
+    blocked[storageKey] = true
+end
+
+---@param storageKey string
+---@return boolean
+local function keyBlocked(storageKey)
+    tokenMemory()
+    return blocked[storageKey] == true
+end
+
+---@param storageKey string
+---@param token string
+local function rememberToken(storageKey, token)
+    tokenMemory()[storageKey] = token
+end
+
+local jsonEscapes = {
+    ["\""] = "\\\"",
+    ["\\"] = "\\\\",
+    ["\n"] = "\\n",
+    ["\r"] = "\\r",
+    ["\t"] = "\\t",
+    ["\b"] = "\\b",
+    ["\f"] = "\\f",
+}
+
+---@param s string
+---@return string
+local function encodeString(s)
+    local out = { "\"" }
+    for i = 1, #s do
+        local c = s:sub(i, i)
+        local escaped = jsonEscapes[c]
+        if escaped then
+            out[#out + 1] = escaped
+        elseif c:byte() < 0x20 then
+            out[#out + 1] = string.format("\\u%04x", c:byte())
+        else
+            out[#out + 1] = c
+        end
+    end
+    out[#out + 1] = "\""
+    return table.concat(out)
+end
+
+---@param n number
+---@return string
+local function encodeNumber(n)
+    if n ~= n or n == math.huge or n == -math.huge then
+        error("cannot encode number")
+    end
+    -- 12 and 12.0 must produce the same token or a reload looks like an edit.
+    if n == math.floor(n) then
+        return string.format("%.0f", n)
+    end
+    return string.format("%.17g", n)
+end
+
+---@param t table
+---@return boolean
+local function isJsonArray(t)
+    local count = 0
+    for _ in pairs(t) do
+        count = count + 1
+    end
+    if count == 0 then return true end
+    for i = 1, count do
+        if t[i] == nil then return false end
+    end
+    return true
+end
+
+---@param value any
+---@return string
+local function encodeStable(value)
+    local kind = type(value)
+    if value == nil then
+        return "null"
+    elseif kind == "boolean" then
+        return value and "true" or "false"
+    elseif kind == "number" then
+        return encodeNumber(value)
+    elseif kind == "string" then
+        return encodeString(value)
+    elseif kind == "table" then
+        if isJsonArray(value) then
+            local parts = {}
+            for i = 1, #value do
+                parts[i] = encodeStable(value[i])
+            end
+            return "[" .. table.concat(parts, ",") .. "]"
+        end
+        local keys = {}
+        for k in pairs(value) do
+            if type(k) ~= "string" then
+                error("JSON object keys must be strings")
+            end
+            keys[#keys + 1] = k
+        end
+        table.sort(keys)
+        local parts = {}
+        for i, k in ipairs(keys) do
+            parts[i] = encodeString(k) .. ":" .. encodeStable(value[k])
+        end
+        return "{" .. table.concat(parts, ",") .. "}"
+    end
+    error("cannot encode value of type '" .. kind .. "'")
+end
+
+-- Callers pass `global` or `player_<tracking id>`. The stored name is the
+-- scope key, not that identity.
+---@param identity string
+---@return string|nil
+local function scopeStorageKey(identity)
+    if identity == "global" then return "scope_global" end
+    if type(identity) == "string" and identity:match("^player_.+") ~= nil then
+        return "scope_" .. identity
+    end
+    return nil
+end
+
+---@param identity string
+---@param id integer
+---@return string|nil
+local function alertStorageKey(identity, id)
+    local scopeKey = scopeStorageKey(identity)
+    if scopeKey == nil or type(id) ~= "number" then return nil end
+    return scopeKey .. "_alert_" .. id
+end
+
+---@param text string|nil
+---@return table|nil
+local function decodeToken(text)
+    if type(text) ~= "string" or text == "" then return nil end
+    if text:sub(1, #Compress.PREFIX) ~= Compress.PREFIX then return nil end
+    local inflated, json = pcall(Compress.decompress, text)
+    if not inflated or type(json) ~= "string" then return nil end
+    local c = codec()
+    if c == nil then return nil end
+    local ok, doc = pcall(function() return c.decode(json) end)
+    if not ok or type(doc) ~= "table" then return nil end
+    return doc
+end
+
+-- The tree is id, kind, name, enabled, and children. Graph and layout stay on
+-- the alert key even when the in-memory entry still has them.
+---@param entry Watchdog.Entry
+---@return table
+local function treeEntry(entry)
+    local copy = {
+        id = entry.id,
+        kind = entry.kind,
+        name = entry.name,
+        enabled = entry.enabled ~= false,
+    }
+    if entry.kind == "group" then
+        local children = {}
+        for i, child in ipairs(entry.children or {}) do
+            children[i] = treeEntry(child)
+        end
+        copy.children = children
+    end
+    return copy
+end
+
+---@param storageKey string
+---@param payload table
+---@return boolean
+local function writeToken(storageKey, payload)
+    if PersistentDB == nil then return false end
+    local encoded, json = pcall(encodeStable, payload)
+    if not encoded then
+        if log ~= nil then log("Watchdog: failed to encode bucket for save") end
+        return false, "failed"
+    end
+    local compressed, token = pcall(Compress.compress, json)
+    if not compressed or type(token) ~= "string" then
+        if log ~= nil then log("Watchdog: failed to save bucket '" .. storageKey .. "'") end
+        return false, "failed"
+    end
+    if tokenMemory()[storageKey] == token then
+        return true
+    end
+    if #token > STORED_TOKEN_CAP then
+        if log ~= nil then log("Watchdog: failed to save bucket '" .. storageKey .. "'") end
+        return false, "size"
+    end
+    -- False, nil, and a throw leave the previous bytes. A true return is the save.
+    local ok, stored = pcall(function() return PersistentDB:SetString(storageKey, token) end)
+    if not ok or stored ~= true then
+        if log ~= nil then log("Watchdog: failed to save bucket '" .. storageKey .. "'") end
+        return false, "failed"
+    end
+    rememberToken(storageKey, token)
+    return true
+end
+
+---@param identity string
+---@param entries Watchdog.Entry[]|nil
+local function attachAlertGraphs(identity, entries)
+    for _, entry in ipairs(entries or {}) do
+        if type(entry) == "table" and entry.kind == "alert" then
+            -- A version-3 row that still carries a graph is ignored. The alert key wins.
+            entry.graph = nil
+            entry.layout = nil
+            local key = alertStorageKey(identity, entry.id)
+            local text
+            local got = true
+            if key ~= nil and PersistentDB ~= nil then
+                got = pcall(function() text = PersistentDB:GetString(key) end)
+            end
+            local payload = got and decodeToken(text) or nil
+            if payload ~= nil and payload.version == ALERT_DOC_VERSION and type(payload.graph) == "table" then
+                rememberToken(key, text)
+                entry.graph = payload.graph
+                entry.layout = payload.layout
+            elseif key ~= nil and (not got or (type(text) == "string" and text ~= "")) then
+                -- Missing is not frozen: a later save may create the key.
+                -- Bytes that are present but not a version-1 alert stay.
+                blockKey(key)
+            end
+        elseif type(entry) == "table" and entry.children ~= nil then
+            attachAlertGraphs(identity, entry.children)
+        end
+    end
+end
+
+-- A new key that is not a version-3 tree must not be replaced. An absent key
+-- is not frozen: that is still the legacy document, or a scope not saved yet.
+---@param key string
+---@return boolean
+local function scopeIsFrozen(key)
+    if keyBlocked(key) then return true end
+    if PersistentDB == nil then return false end
+    local text
+    local got = pcall(function() text = PersistentDB:GetString(key) end)
+    if not got then
+        blockKey(key)
+        return true
+    end
+    if type(text) ~= "string" or text == "" then return false end
+    if tokenMemory()[key] == text then return false end
+    local payload = decodeToken(text)
+    if payload ~= nil and payload.version == SCOPE_DOC_VERSION and type(payload.entries) == "table" then
+        rememberToken(key, text)
+        return false
+    end
+    blockKey(key)
+    return true
+end
+
+---@param identity string
+---@param entry Watchdog.Entry
+---@return boolean
+---@return "size"|"failed"|nil reason
+function Store.SaveAlert(identity, entry)
+    if type(entry) ~= "table" or entry.kind ~= "alert" then return false, "failed" end
+    local scopeKey = scopeStorageKey(identity)
+    if scopeKey ~= nil and scopeIsFrozen(scopeKey) then return false, "failed" end
+    local key = alertStorageKey(identity, entry.id)
+    if key == nil or keyBlocked(key) then return false, "failed" end
+    return writeToken(key, {
+        version = ALERT_DOC_VERSION,
+        graph = entry.graph,
+        layout = entry.layout or {},
+    })
+end
+
+---@param identity string
+---@param doc Watchdog.Bucket
+---@return boolean
+---@return "size"|"failed"|nil reason
+function Store.SaveScope(identity, doc)
+    local key = scopeStorageKey(identity)
+    if key == nil or type(doc) ~= "table" then return false, "failed" end
+    if scopeIsFrozen(key) then return false, "failed" end
+    local entries = {}
+    for i, entry in ipairs(doc.entries or {}) do
+        entries[i] = treeEntry(entry)
+    end
+    local payload = {
+        version = SCOPE_DOC_VERSION,
+        entries = entries,
+    }
+    -- The infobox anchor lives on the global tree only.
+    if identity == "global" and type(doc.infoboxAnchor) == "table" then
+        payload.infoboxAnchor = { x = doc.infoboxAnchor.x, y = doc.infoboxAnchor.y }
+    end
+    return writeToken(key, payload)
+end
+
+-- Only the old numeric character keys are still documents. A display-name
+-- `player_*` key is not a scope.
+---@param identity string
+---@return boolean
+local function legacyIdentity(identity)
+    return identity == "global" or (type(identity) == "string" and identity:match("^player_%d+$") ~= nil)
+end
+
+-- "split" is a version-3 tree already on disk. "unreadable" must not be written.
+-- "legacy" is the old document. "absent" has neither.
+---@param identity string
+---@return "split"|"legacy"|"unreadable"|"absent"
+function Store.ScopeStorage(identity)
+    local key = scopeStorageKey(identity)
+    if key == nil or PersistentDB == nil then return "absent" end
+    if scopeIsFrozen(key) then return "unreadable" end
+    local text
+    local got = pcall(function() text = PersistentDB:GetString(key) end)
+    if not got then return "unreadable" end
+    if type(text) == "string" and text ~= "" then return "split" end
+    if legacyIdentity(identity) then return "legacy" end
+    return "absent"
+end
+
+---@param identity string
+---@return Watchdog.Bucket doc
+---@return string[]|nil unreadNames
+---@return "unreadable"|nil problem
+function Store.LoadScope(identity)
+    if PersistentDB == nil then return Store.Empty() end
+    local key = scopeStorageKey(identity)
+    if key == nil then return Store.Empty() end
+    local text
+    local got = pcall(function() text = PersistentDB:GetString(key) end)
+    if not got then
+        blockKey(key)
+        return Store.Empty(), nil, "unreadable"
+    end
+    if type(text) ~= "string" or text == "" then
+        if legacyIdentity(identity) then
+            return Store.LoadKey(identity)
+        end
+        return Store.Empty()
+    end
+    local payload = decodeToken(text)
+    if payload == nil or payload.version ~= SCOPE_DOC_VERSION or type(payload.entries) ~= "table" then
+        blockKey(key)
+        return Store.Empty(), nil, "unreadable"
+    end
+    rememberToken(key, text)
+    attachAlertGraphs(identity, payload.entries)
+    stripEntryNames(payload.entries)
+    migrateSavedGraphs(payload.entries)
+    local unread = {}
+    local function collectUnread(entries)
+        for _, entry in ipairs(entries or {}) do
+            if type(entry) == "table" and entry.kind == "alert" and type(entry.graph) ~= "table" then
+                unread[#unread + 1] = entry.name or "Alert"
+            elseif type(entry) == "table" and entry.children ~= nil then
+                collectUnread(entry.children)
+            end
+        end
+    end
+    collectUnread(payload.entries)
+    return payload, unread
 end
 
 return Store

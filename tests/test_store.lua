@@ -25,6 +25,7 @@ LibNodeGraph = {
 local Store = require("src/store")
 local Registry = require("registry")
 local Node = require("src/ui/node")
+local Compress = require("src/compress")
 
 -- A minimal in-memory stand-in for the client PersistentDB (string key/value store).
 local function newFakePersistentDB()
@@ -1121,6 +1122,423 @@ function TestStore:testTrueSetStringIsSavedWithoutReadingItBack()
     seedAlert(self, doc, "kept", true)
     luaunit.assertTrue(Store.SaveTo(key, doc))
     luaunit.assertStrContains(PersistentDB.data[key], "kept")
+end
+
+--- Split scope: the tree and each alert graph are separate WD1 keys (#184). ---
+-- Stored bytes are the contract. The loaded tree is the same shape callers
+-- already walk, with the graph filled back in from the alert key.
+
+local function decodeToken(text)
+    luaunit.assertEquals(type(text), "string")
+    luaunit.assertEquals(text:sub(1, 3), "WD1")
+    return LibNodeGraph.Json.Default.decode(Compress.decompress(text))
+end
+
+-- Letters, not a repeated byte. A repeated byte deflates under the cap and
+-- would not exercise the refusal. 200000 is past the point where this
+-- generator's WD1 token exceeds 131070 bytes.
+local function incompressible(count)
+    local parts = {}
+    local x = 123456789
+    for i = 1, count do
+        x = (1103515245 * x + 12345) % 2147483648
+        parts[i] = string.char(48 + (x % 26))
+    end
+    return table.concat(parts)
+end
+
+function TestStore:testSplitScopeRoundTripsTheTreeAndTheAlertGraph()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "alpha", true)
+    Store.SetInfoBoxAnchor(doc, 12, 34)
+    local entry = Store.FindById(doc, id)
+
+    luaunit.assertTrue(Store.SaveAlert("global", entry))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+
+    luaunit.assertNil(PersistentDB:GetString("global"))
+    local scope = decodeToken(PersistentDB:GetString("scope_global"))
+    luaunit.assertEquals(scope.version, 3)
+    luaunit.assertEquals(scope.entries[1].id, id)
+    luaunit.assertEquals(scope.entries[1].kind, "alert")
+    luaunit.assertEquals(scope.entries[1].name, "alpha")
+    luaunit.assertEquals(scope.entries[1].enabled, true)
+    luaunit.assertNil(scope.entries[1].graph)
+    luaunit.assertNil(scope.entries[1].layout)
+    luaunit.assertEquals(scope.infoboxAnchor.x, 12)
+    luaunit.assertEquals(scope.infoboxAnchor.y, 34)
+
+    local alert = decodeToken(PersistentDB:GetString("scope_global_alert_" .. id))
+    luaunit.assertEquals(alert.version, 1)
+    luaunit.assertEquals(alert.graph.version, 1)
+    luaunit.assertEquals(alert.graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(alert.layout, {})
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(loaded.version, 3)
+    luaunit.assertEquals(loaded.entries[1].name, "alpha")
+    luaunit.assertEquals(loaded.entries[1].graph.version, 1)
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+    local x, y = Store.GetInfoBoxAnchor(loaded)
+    luaunit.assertEquals({ x, y }, { 12, 34 })
+    local restored = Store.RestoreAll(loaded, self.registry)
+    luaunit.assertEquals(#restored, 1)
+    luaunit.assertEquals(restored[1].name, "alpha")
+end
+
+function TestStore:testTheSameAlertIdInTwoScopesIsTwoKeys()
+    local globalDoc = Store.Empty()
+    local playerDoc = Store.Empty()
+    local id = seedAlert(self, globalDoc, "global-horn", true)
+    local character = graphWithOneNode(self.registry)
+    Store.InsertEntry(playerDoc, Store.NewAlertEntry(id, "character-horn", character, {}, true))
+    playerDoc.entries[1].graph.nodes[1].name = "character only"
+    Store.SetInfoBoxAnchor(playerDoc, 9, 9)
+    local groupId = Store.MintId(globalDoc)
+    Store.InsertEntry(globalDoc, Store.NewGroupEntry(groupId, "folder", true, {}))
+    local nestedId = seedAlert(self, globalDoc, "nested", false, groupId)
+
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(globalDoc, id)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(globalDoc, nestedId)))
+    luaunit.assertTrue(Store.SaveScope("global", globalDoc))
+    luaunit.assertTrue(Store.SaveAlert("player_42", playerDoc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("player_42", playerDoc))
+
+    local globalAlert = decodeToken(PersistentDB:GetString("scope_global_alert_" .. id))
+    local playerAlert = decodeToken(PersistentDB:GetString("scope_player_42_alert_" .. id))
+    luaunit.assertNil(globalAlert.graph.nodes[1].name)
+    luaunit.assertEquals(playerAlert.graph.nodes[1].name, "character only")
+
+    local scope = decodeToken(PersistentDB:GetString("scope_global"))
+    luaunit.assertEquals(scope.entries[2].kind, "group")
+    luaunit.assertEquals(scope.entries[2].children[1].name, "nested")
+    luaunit.assertEquals(scope.entries[2].children[1].enabled, false)
+    luaunit.assertNil(scope.entries[2].children[1].graph)
+    luaunit.assertNil(decodeToken(PersistentDB:GetString("scope_player_42")).infoboxAnchor)
+
+    local loadedGlobal = Store.LoadScope("global")
+    local loadedPlayer = Store.LoadScope("player_42")
+    luaunit.assertEquals(loadedGlobal.entries[1].name, "global-horn")
+    luaunit.assertNil(loadedGlobal.entries[1].graph.nodes[1].name)
+    luaunit.assertEquals(loadedGlobal.entries[2].children[1].name, "nested")
+    luaunit.assertEquals(loadedGlobal.entries[2].children[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(loadedPlayer.entries[1].name, "character-horn")
+    luaunit.assertEquals(loadedPlayer.entries[1].graph.nodes[1].name, "character only")
+    luaunit.assertNil(loadedPlayer.infoboxAnchor)
+    local x, y = Store.GetInfoBoxAnchor(loadedGlobal)
+    luaunit.assertNil(x)
+    luaunit.assertNil(y)
+end
+
+function TestStore:testUnchangedScopeAndAlertTokensSkipTheWrite()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "alpha", true)
+    local writes = {}
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes[key] = (writes[key] or 0) + 1
+        return inner(self, key, value)
+    end
+
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    luaunit.assertEquals(writes["scope_global_alert_" .. id], 1)
+    luaunit.assertEquals(writes.scope_global, 1)
+
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    luaunit.assertEquals(writes["scope_global_alert_" .. id], 1)
+    luaunit.assertEquals(writes.scope_global, 1)
+
+    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
+    doc.entries[1].name = "renamed"
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
+    luaunit.assertEquals(decodeToken(PersistentDB:GetString("scope_global")).entries[1].name, "renamed")
+    luaunit.assertEquals(writes.scope_global, 2)
+
+    writes = {}
+    local loaded = Store.LoadScope("global")
+    luaunit.assertTrue(Store.SaveScope("global", loaded))
+    luaunit.assertTrue(Store.SaveAlert("global", loaded.entries[1]))
+    luaunit.assertNil(writes.scope_global)
+    luaunit.assertNil(writes["scope_global_alert_" .. id])
+end
+
+function TestStore:testATokenOverTheCapIsRefusedBeforeTheWrite()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "alpha", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local previousAlert = PersistentDB:GetString("scope_global_alert_" .. id)
+    local previousScope = PersistentDB:GetString("scope_global")
+    local writes = 0
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes = writes + 1
+        return inner(self, key, value)
+    end
+
+    doc.entries[1].graph.nodes[1].controls = { text = incompressible(200000) }
+    local alertOk, alertReason = Store.SaveAlert("global", doc.entries[1])
+    luaunit.assertFalse(alertOk)
+    luaunit.assertEquals(alertReason, "size")
+    luaunit.assertEquals(writes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), previousAlert)
+    luaunit.assertEquals(#doc.entries[1].graph.nodes[1].controls.text, 200000)
+
+    doc.entries[1].name = incompressible(200000)
+    local scopeOk, scopeReason = Store.SaveScope("global", doc)
+    luaunit.assertFalse(scopeOk)
+    luaunit.assertEquals(scopeReason, "size")
+    luaunit.assertEquals(writes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), previousScope)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), previousAlert)
+end
+
+function TestStore:testACompressionFailureIsNotASizeRefusal()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "alpha", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local previousAlert = PersistentDB:GetString("scope_global_alert_" .. id)
+    local previousScope = PersistentDB:GetString("scope_global")
+    local writes = 0
+    local inner = PersistentDB.SetString
+    function PersistentDB:SetString(key, value)
+        writes = writes + 1
+        return inner(self, key, value)
+    end
+    -- The deflate encoder accepts every string JSON can produce below its own
+    -- output cap, so the failure this save has to tell from a size refusal is
+    -- the compressor throwing.
+    local original = Compress.compress
+    Compress.compress = function() error("deflate broke") end
+    doc.entries[1].name = "edited"
+    local alertOk, alertReason = Store.SaveAlert("global", doc.entries[1])
+    local scopeOk, scopeReason = Store.SaveScope("global", doc)
+    Compress.compress = original
+
+    luaunit.assertFalse(alertOk)
+    luaunit.assertEquals(alertReason, "failed")
+    luaunit.assertFalse(scopeOk)
+    luaunit.assertEquals(scopeReason, "failed")
+    luaunit.assertEquals(writes, 0)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), previousAlert)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), previousScope)
+end
+
+function TestStore:testAMissingOrUnreadableAlertLeavesTheRowUnarmed()
+    local doc = Store.Empty()
+    local kept = seedAlert(self, doc, "kept", true)
+    local missing = seedAlert(self, doc, "missing", true)
+    local bad = seedAlert(self, doc, "bad", true)
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, kept)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, missing)))
+    luaunit.assertTrue(Store.SaveAlert("global", Store.FindById(doc, bad)))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+
+    local scopeBefore = PersistentDB:GetString("scope_global")
+    local badKey = "scope_global_alert_" .. bad
+    local corrupt = "WD1not-a-token"
+    PersistentDB.data["scope_global_alert_" .. missing] = nil
+    PersistentDB.data[badKey] = corrupt
+    local orphan = PersistentDB:GetString("scope_global_alert_" .. kept)
+    PersistentDB.data["scope_global_alert_999"] = orphan
+
+    local loaded, unread = Store.LoadScope("global")
+    luaunit.assertEquals(#loaded.entries, 3)
+    luaunit.assertEquals(loaded.entries[1].name, "kept")
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertNil(loaded.entries[2].graph)
+    luaunit.assertNil(loaded.entries[3].graph)
+    luaunit.assertEquals(unread, { "missing", "bad" })
+    local restored = Store.RestoreAll(loaded, self.registry)
+    luaunit.assertEquals(#restored, 1)
+    luaunit.assertEquals(restored[1].id, kept)
+    luaunit.assertNil(Store.FindById(loaded, 999))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
+    luaunit.assertEquals(PersistentDB:GetString(badKey), corrupt)
+    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_999"), orphan)
+
+    local badEntry = Store.FindById(loaded, bad)
+    badEntry.graph = loaded.entries[1].graph
+    badEntry.layout = {}
+    local ok, reason = Store.SaveAlert("global", badEntry)
+    luaunit.assertFalse(ok)
+    luaunit.assertEquals(reason, "failed")
+    luaunit.assertEquals(PersistentDB:GetString(badKey), corrupt)
+end
+
+function TestStore:testAnUnknownScopeVersionIsLeftOnDisk()
+    local future = Compress.compress(LibNodeGraph.Json.Default.encode({
+        version = 4,
+        entries = { { id = 1, kind = "alert", name = "future", enabled = true } },
+    }))
+    local bare = Compress.compress(LibNodeGraph.Json.Default.encode({
+        entries = { { id = 1, kind = "alert", name = "bare", enabled = true } },
+    }))
+    PersistentDB:SetString("scope_global", future)
+    PersistentDB:SetString("scope_player_42", bare)
+
+    local global = Store.LoadScope("global")
+    local player = Store.LoadScope("player_42")
+    luaunit.assertEquals(global.entries, {})
+    luaunit.assertEquals(player.entries, {})
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), future)
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_42"), bare)
+
+    local doc = Store.Empty()
+    seedAlert(self, doc, "nope", true)
+    luaunit.assertFalse(Store.SaveScope("global", doc))
+    luaunit.assertFalse(Store.SaveScope("player_42", doc))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), future)
+    luaunit.assertEquals(PersistentDB:GetString("scope_player_42"), bare)
+end
+
+function TestStore:testAnUnknownAlertVersionIsLeftOnDisk()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "alpha", true)
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local future = Compress.compress(LibNodeGraph.Json.Default.encode({
+        version = 2,
+        graph = { version = 9, nodes = {}, connections = {} },
+        layout = {},
+    }))
+    local key = "scope_global_alert_" .. id
+    PersistentDB:SetString(key, future)
+
+    local loaded, unread = Store.LoadScope("global")
+    luaunit.assertEquals(loaded.entries[1].name, "alpha")
+    luaunit.assertNil(loaded.entries[1].graph)
+    luaunit.assertEquals(unread, { "alpha" })
+    luaunit.assertEquals(#Store.RestoreAll(loaded, self.registry), 0)
+    luaunit.assertEquals(PersistentDB:GetString(key), future)
+
+    loaded.entries[1].graph = doc.entries[1].graph
+    loaded.entries[1].layout = {}
+    luaunit.assertFalse(Store.SaveAlert("global", loaded.entries[1]))
+    luaunit.assertEquals(PersistentDB:GetString(key), future)
+end
+
+function TestStore:testAVersion3RowUsesTheAlertKeyNotAnInlineGraph()
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "alpha", true)
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    local inline = {
+        version = 3,
+        entries = { {
+            id = id,
+            kind = "alert",
+            name = "alpha",
+            enabled = true,
+            graph = {
+                version = 1,
+                nodes = { { id = 7, type = "not.the.alert", controls = {} } },
+                connections = {},
+            },
+            layout = { { id = 7, x = 5, y = 6 } },
+        } },
+    }
+    local stored = Compress.compress(LibNodeGraph.Json.Default.encode(inline))
+    PersistentDB:SetString("scope_global", stored)
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(loaded.entries[1].layout, {})
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), stored)
+end
+
+function TestStore:testAnUnreadableScopeKeyIsNotOverwrittenOrReplacedByTheOldDocument()
+    local legacy = LibNodeGraph.Json.Default.encode({
+        version = 2,
+        entries = { {
+            id = 1,
+            kind = "alert",
+            name = "legacy",
+            enabled = true,
+            graph = { version = 1, nodes = {}, connections = {} },
+            layout = {},
+        } },
+        infoboxAnchor = nil,
+    })
+    local corrupt = "{not-a-token"
+    PersistentDB:SetString("global", legacy)
+    PersistentDB:SetString("scope_global", corrupt)
+
+    local loaded, _, problem = Store.LoadScope("global")
+    luaunit.assertEquals(problem, "unreadable")
+    luaunit.assertEquals(loaded.entries, {})
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), corrupt)
+    luaunit.assertEquals(PersistentDB:GetString("global"), legacy)
+
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "new", true)
+    luaunit.assertFalse(Store.SaveScope("global", doc))
+    luaunit.assertFalse(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), corrupt)
+    luaunit.assertEquals(PersistentDB:GetString("global"), legacy)
+    luaunit.assertNil(PersistentDB:GetString("scope_global_alert_" .. id))
+
+    local player = Store.Empty()
+    Store.InsertEntry(player, Store.NewAlertEntry(1, "other", graphWithOneNode(self.registry), {}, true))
+    luaunit.assertTrue(Store.SaveAlert("player_42", player.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("player_42", player))
+    luaunit.assertEquals(Store.LoadScope("player_42").entries[1].name, "other")
+    luaunit.assertEquals(PersistentDB:GetString("scope_global"), corrupt)
+end
+
+function TestStore:testAScopeKeyThatThrowsOnReadIsNotOverwritten()
+    PersistentDB.data.scope_global = "WD1kept"
+    PersistentDB.data.global = "{\"version\":2,\"entries\":[{\"name\":\"legacy\"}]}"
+    function PersistentDB:GetString(key)
+        if key == "scope_global" then error("unreadable") end
+        return self.data[key]
+    end
+
+    local loaded, _, problem = Store.LoadScope("global")
+    luaunit.assertEquals(problem, "unreadable")
+    luaunit.assertEquals(loaded.entries, {})
+    luaunit.assertEquals(PersistentDB.data.scope_global, "WD1kept")
+    luaunit.assertEquals(PersistentDB.data.global, "{\"version\":2,\"entries\":[{\"name\":\"legacy\"}]}")
+
+    local doc = Store.Empty()
+    local id = seedAlert(self, doc, "nope", true)
+    luaunit.assertFalse(Store.SaveScope("global", doc))
+    luaunit.assertFalse(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertEquals(PersistentDB.data.scope_global, "WD1kept")
+    luaunit.assertNil(PersistentDB.data["scope_global_alert_" .. id])
+    luaunit.assertEquals(PersistentDB.data.global, "{\"version\":2,\"entries\":[{\"name\":\"legacy\"}]}")
+end
+
+function TestStore:testALegacyScopeLoadsAndSavesWhileTheNewKeyIsAbsent()
+    local doc = Store.Empty()
+    seedAlert(self, doc, "alpha", true)
+    luaunit.assertTrue(Store.SaveTo("global", doc))
+    luaunit.assertNil(PersistentDB:GetString("scope_global"))
+
+    local loaded = Store.LoadScope("global")
+    luaunit.assertEquals(loaded.entries[1].name, "alpha")
+    luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
+    loaded.entries[1].name = "renamed"
+    luaunit.assertTrue(Store.SaveTo("global", loaded))
+    luaunit.assertNil(PersistentDB:GetString("scope_global"))
+    luaunit.assertStrContains(PersistentDB:GetString("global"), "renamed")
+
+    luaunit.assertTrue(Store.SaveTo("player_42", doc))
+    luaunit.assertEquals(Store.LoadScope("player_42").entries[1].name, "alpha")
+    luaunit.assertNil(PersistentDB:GetString("scope_player_42"))
+
+    local displayName = PersistentDB:GetString("global")
+    PersistentDB:SetString("player_ZeZima", displayName)
+    local inner = PersistentDB.GetString
+    function PersistentDB:GetString(key)
+        if key == "player_ZeZima" then error("read a display-name key") end
+        return inner(self, key)
+    end
+    local skipped = Store.LoadScope("player_ZeZima")
+    luaunit.assertEquals(skipped.entries, {})
+    luaunit.assertEquals(PersistentDB.data.player_ZeZima, displayName)
 end
 
 return TestStore

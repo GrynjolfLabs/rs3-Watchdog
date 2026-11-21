@@ -672,4 +672,68 @@ function TestScopeEdits:testCreateFromAlertPresetSavesACopyAndOpensIt()
     luaunit.assertEquals(Store.LoadKey("global").entries[1].name, "Pack Siren")
 end
 
+function TestScopeEdits:testCreateOnASplitScopeReloadsTheNewAlert()
+    local doc = Store.Empty()
+    local id = Store.MintId(doc)
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    Store.InsertEntry(doc, Store.NewAlertEntry(id, "Horn", graph, {}, true))
+    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
+    luaunit.assertTrue(Store.SaveScope("global", doc))
+    local loaded = Store.LoadScope("global")
+    self.doc = loaded
+    self.scopes.global.doc = loaded
+    self.list = {}
+    self.scopes.global.list = self.list
+
+    local result, created = self.edits:CreateFromScratch("global")
+
+    luaunit.assertEquals(result.kind, "open")
+    luaunit.assertNotNil(created)
+    local again = Store.LoadScope("global")
+    luaunit.assertEquals(#again.entries, 2)
+    luaunit.assertEquals(again.entries[1].name, "Horn")
+    luaunit.assertEquals(again.entries[1].graph.nodes[1].type, "fixture.trigger")
+    luaunit.assertEquals(again.entries[2].name, "New Alert")
+    luaunit.assertEquals(again.entries[2].graph.version, 1)
+    luaunit.assertEquals(#again.entries[2].graph.nodes, 0)
+end
+
+function TestScopeEdits:testCreateDeleteImportMoveAndEnableAreRefusedWhenTheScopeCannotBeRead()
+    PersistentDB:SetString("scope_global", "{nope")
+    local loaded, _, problem = Store.LoadScope("global")
+    luaunit.assertEquals(problem, "unreadable")
+    self.doc = loaded
+    self.scopes.global.doc = loaded
+    local graph = LibNodeGraph.NewGraph(self.registry)
+    graph:AddNode("fixture.trigger")
+    Store.InsertEntry(self.doc, Store.NewAlertEntry(1, "Horn", graph, {}, true))
+    local source = Store.Empty()
+    Store.InsertEntry(source, Store.NewAlertEntry(3, "Away", graph, {}, true))
+    self.scopes.player_42 = { doc = source, key = "player_42", list = {} }
+
+    self.edits:ToggleEnabled("global", 1)
+    luaunit.assertEquals(Store.FindById(self.doc, 1).enabled, true)
+
+    local deleted = self.edits:Delete("global", 1)
+    luaunit.assertEquals(deleted.kind, "leave")
+    luaunit.assertNotNil(Store.FindById(self.doc, 1))
+
+    local _, exportOk, text = self.edits:ExportEntries("global", { 1 })
+    luaunit.assertEquals(exportOk, true)
+    local _, imported = self.edits:ImportJson("global", text)
+    luaunit.assertFalse(imported)
+    luaunit.assertEquals(#self.doc.entries, 1)
+
+    local moved = self.edits:BulkMove("player_42", "global", { 3 })
+    luaunit.assertEquals(moved.kind, "leave")
+    luaunit.assertEquals(#source.entries, 1)
+    luaunit.assertNil(Store.FindById(self.doc, 3))
+
+    local createdResult, created = self.edits:CreateFromScratch("global")
+    luaunit.assertEquals(createdResult.kind, "leave")
+    luaunit.assertNil(created)
+    luaunit.assertEquals(#self.doc.entries, 1)
+end
+
 return TestScopeEdits

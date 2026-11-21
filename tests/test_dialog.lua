@@ -350,6 +350,34 @@ function TestDialog:testFailedSaveMessageDoesNotCallItASizeProblem()
     luaunit.assertNil(body:find("too big", 1, true))
 end
 
+function TestDialog:testTooBigMessageSaysItIsTooBig()
+    local win = Dialog.tooBig(self.parent)
+    luaunit.assertEquals(win.title, "Too big to save")
+    luaunit.assertEquals(win.texts, {
+        "That change is too big to save.",
+        "The last saved copy is still there.",
+    })
+    luaunit.assertEquals(win.buttons[1].label, "Close")
+end
+
+function TestDialog:testUnreadAlertMessageNamesTheAlert()
+    local win = Dialog.unreadAlerts(self.parent, { "Horn" })
+    luaunit.assertEquals(win.title, "Could not load")
+    luaunit.assertEquals(win.texts[1], "Could not load Horn.")
+    luaunit.assertEquals(win.texts[2], "The saved copy is still there.")
+end
+
+function TestDialog:testUnreadableScopeMessageDoesNotCallItASizeProblem()
+    local win = Dialog.scopeUnreadable(self.parent)
+    luaunit.assertEquals(win.title, "Could not load")
+    luaunit.assertEquals(win.texts, {
+        "This scope could not be read.",
+        "Nothing was written over the saved copy.",
+    })
+    local body = table.concat(win.texts, " ")
+    luaunit.assertNil(body:find("too big", 1, true))
+end
+
 function TestConfirmWrapper:setUp()
     self._savedUi = _G.ui
     self._savedPretty = _G.prettyui
