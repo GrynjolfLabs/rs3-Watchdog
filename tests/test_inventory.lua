@@ -538,6 +538,10 @@ function TestInventory:testItemCountChangedIsInventoryCategoryPureNode()
     luaunit.assertNil(nt.pins["in"])
     luaunit.assertNil(nt.pins.changed)
     luaunit.assertNil(nt.pins.unchanged)
+    luaunit.assertEquals(nt.pinOrder, {
+        "prevSnapshot", "snapshot", "nameMatch", "noteFilter",
+        "count", "prevCount", "delta",
+    })
     luaunit.assertEquals(nt.pins.snapshot.dataType, "invSnapshot")
     luaunit.assertEquals(nt.pins.snapshot.direction, "in")
     luaunit.assertEquals(nt.pins.prevSnapshot.dataType, "invSnapshot")

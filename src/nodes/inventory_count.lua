@@ -98,10 +98,10 @@ function InventoryCount.Register(registry)
         displayName = "Item Count Changed",
         description = "Current and previous matching stack sums, and their difference",
         pins = {
-            { name = "snapshot", kind = "data", direction = "in", dataType = "invSnapshot",
-              label = "Snapshot" },
             { name = "prevSnapshot", kind = "data", direction = "in", dataType = "invSnapshot",
               label = "Prev snapshot" },
+            { name = "snapshot", kind = "data", direction = "in", dataType = "invSnapshot",
+              label = "Snapshot" },
             { name = "nameMatch", kind = "data", direction = "in", dataType = "matcher",
               label = "Name", default = { needle = "", mode = "substring" } },
             { name = "noteFilter", kind = "data", direction = "in", dataType = "invNoteFilter",
