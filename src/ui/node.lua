@@ -241,6 +241,26 @@ function Node.BuildGeometry(pins, x, y, width, opts)
         return Theme.TextWidth(12, text) or (#text * Theme.CONTROL_LABEL_CHAR_W)
     end
 
+    ---@param pinControl { Layout: fun(band: table): table|nil, Inline: boolean }
+    ---@param name string
+    ---@param defaultValue any
+    ---@param rects table[]
+    local function appendControlRects(pinControl, name, defaultValue, rects)
+        for _, r in ipairs(rects) do
+            geom.controls[#geom.controls + 1] = {
+                pinName    = name,
+                pinControl = pinControl,
+                default    = defaultValue,
+                -- `kind`/`axis` name the sub-rect for the Editor's press + isEditingThis skip;
+                -- how it PAINTS is the Pin Control's Draw, not a discriminator the Node reads.
+                kind = r.kind, axis = r.axis,
+                enabled = r.enabled,          -- a mode checkbox row's toggle-ability
+                placeholder = r.placeholder,  -- e.g. the matcher needle's / capture's empty-state hint
+                x = r.x, y = r.y, w = r.w, h = r.h,
+            }
+        end
+    end
+
     -- `left` is already past the row's own label. The box stops short of an output
     -- label on the same row.
     ---@param pinControl { Layout: fun(band: table): table|nil, Inline: boolean }
@@ -261,22 +281,9 @@ function Node.BuildGeometry(pins, x, y, width, opts)
             right = left + Theme.CONTROL_MIN_W
         end
         if right < left then right = left end
-        local rects = pinControl.Layout({
+        appendControlRects(pinControl, name, defaultValue, pinControl.Layout({
             x = left, y = cy - Theme.CONTROL_H * 0.5, w = right - left, h = Theme.CONTROL_H,
-        }) or {}
-        for _, r in ipairs(rects) do
-            geom.controls[#geom.controls + 1] = {
-                pinName = name,
-                pinControl = pinControl,
-                default = defaultValue,
-                -- `kind`/`axis` name the sub-rect for the Editor's press + isEditingThis skip.
-                -- How it paints is the Pin Control's Draw, not a discriminator the Node reads.
-                kind = r.kind, axis = r.axis,
-                enabled = r.enabled,          -- a mode checkbox row's toggle-ability
-                placeholder = r.placeholder,  -- e.g. the matcher needle's / capture's empty-state hint
-                x = r.x, y = r.y, w = r.w, h = r.h,
-            }
-        end
+        }) or {})
     end
 
     for i, pin in ipairs(placeholder and {} or inputs) do
@@ -289,24 +296,10 @@ function Node.BuildGeometry(pins, x, y, width, opts)
                 layoutInline(pinControl, pin.name, pin.default, left, cy, outputs[i])
             else
                 local extraH = pinControl.ReservedHeight(pin) or 0
-                local band = {
+                appendControlRects(pinControl, pin.name, pin.default, pinControl.Layout({
                     x = Theme.PIN_MARGIN_X, y = rowTop[i + 1] - extraH,
                     w = width - Theme.PIN_MARGIN_X * 2, h = extraH,
-                }
-                local rects = pinControl.Layout(band) or {}
-                for _, r in ipairs(rects) do
-                    geom.controls[#geom.controls + 1] = {
-                        pinName    = pin.name,
-                        pinControl = pinControl,
-                        default    = pin.default,
-                        -- `kind`/`axis` name the sub-rect for the Editor's press + isEditingThis skip;
-                        -- how it PAINTS is the Pin Control's Draw, not a discriminator the Node reads.
-                        kind = r.kind, axis = r.axis,
-                        enabled = r.enabled,          -- a mode checkbox row's toggle-ability
-                        placeholder = r.placeholder,  -- e.g. the matcher needle's / capture's empty-state hint
-                        x = r.x, y = r.y, w = r.w, h = r.h,
-                    }
-                end
+                }) or {})
             end
         end
     end

@@ -128,7 +128,7 @@ function Runtime.new(eventSource, mouseSource, identitySource)
         _pendingResolve = false,
         _bucketLoader = nil,
         channels = {},
-        -- Player Input mouse-move bindings. Fired from the cursor poll, not an event channel.
+        -- Player Input mouse-move bindings.
         _cursorMoves = {},
         -- Poll Enter/Leave edge state, keyed by graph then nodeId (ids unique only within a graph).
         -- Weak keys; missing ⇒ false (already-true-at-load fires Enter); never serialized.
@@ -653,7 +653,6 @@ function Runtime:BindCursorMove(typeKey, filter)
     self._cursorMoves[#self._cursorMoves + 1] = { typeKey = typeKey, filter = filter }
 end
 
----@return nil
 function Runtime:_fireCursorMoves()
     for _, binding in ipairs(self._cursorMoves) do
         self:_fireBinding(binding, nil)

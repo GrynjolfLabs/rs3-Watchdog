@@ -90,7 +90,7 @@ end
 
 local function writeString(key, value)
     if PersistentDB == nil then return end
-    -- False, nil, and a throw leave the previous bytes. No dialog: these are not scope saves.
+    -- No dialog: shell prefs are not a scope save.
     local setOk, stored = pcall(function()
         return PersistentDB:SetString(key, value)
     end)

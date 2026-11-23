@@ -14,12 +14,11 @@ function PlayerInput.Register(registry, runtime)
             { name = "out", kind = "exec", direction = "out" },
         },
         run = function(ctx)
-            -- The exec output does not name which input happened. Downstream sees no payload.
             ctx:Fire("out")
         end,
     })
 
-    -- The filter runs before Fire. _pull is the read ctx:In would make.
+    -- The filter runs before the node, so this is the read ctx:In would make.
     ---@param name string
     ---@return fun(payload: any, node: Watchdog.NodeHandle, graph: LibNodeGraph.Graph): boolean
     local function checkOn(name)

@@ -13,17 +13,12 @@ function Sound.Register(registry)
         category = "action",
         displayName = "Sound Effect",
         pins = {
-            { name = "in",     kind = "exec", direction = "in" },
+            { name = "in", kind = "exec", direction = "in" },
             AudioBus.Pin(),
-            {
-                name = "soundId",
-                kind = "data",
-                direction = "in",
-                dataType = "number",
-                default = DEFAULT_SOUND_ID
-            },
+            { name = "soundId", kind = "data", direction = "in", dataType = "number",
+              default = DEFAULT_SOUND_ID },
             { name = "volume", kind = "data", direction = "in", dataType = "number", default = 100 },
-            { name = "loops",  kind = "data", direction = "in", dataType = "number", default = 0 },
+            { name = "loops", kind = "data", direction = "in", dataType = "number", default = 0 },
         },
         run = function(ctx)
             -- The registry resolves a raw id or a pack record to the stored

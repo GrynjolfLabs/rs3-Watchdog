@@ -77,7 +77,7 @@ local toast = ToastStack.new(effects, {
         if PersistentDB == nil or LibNodeGraph == nil or LibNodeGraph.Json == nil then return end
         local ok, text = pcall(function() return LibNodeGraph.Json.Default.encode(pos) end)
         if ok and text ~= nil then
-            -- False, nil, and a throw leave the previous bytes. No dialog: this is not a scope save.
+            -- No dialog: a toast anchor is not a scope save.
             local setOk, stored = pcall(function()
                 return PersistentDB:SetString(TOAST_ANCHOR_KEY, text)
             end)

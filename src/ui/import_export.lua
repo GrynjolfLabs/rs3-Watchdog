@@ -16,7 +16,7 @@ function ImportExport.noteTransfer(kind, ok, detail)
     if PersistentDB == nil then return end
     local text = string.format(
         "%s\tok=%s\t%s", kind, tostring(ok), tostring(detail):sub(1, 500))
-    -- False, nil, and a throw leave the previous bytes. No dialog: a transfer note is not a scope save.
+    -- No dialog: a transfer note is not a scope save.
     local setOk, stored = pcall(function()
         return PersistentDB:SetString("transfer_last", text)
     end)

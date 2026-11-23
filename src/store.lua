@@ -613,8 +613,7 @@ function Store.SaveTo(key, doc)
         if log ~= nil then log("Watchdog: failed to encode bucket for save") end
         return false
     end
-    -- False, nil, and a throw leave the previous bytes. A true return is the
-    -- save. Reading the key back would treat a stale read as a second answer.
+    -- Reading the key back would treat a stale read as a second answer.
     local ok, stored = pcall(function() return PersistentDB:SetString(key, text) end)
     if not ok or stored ~= true then
         if log ~= nil then

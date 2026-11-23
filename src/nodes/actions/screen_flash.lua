@@ -58,10 +58,9 @@ function ScreenFlash.AlphaAt(elapsed, peak, inShape, outShape, rise, fall)
     return 0
 end
 
--- Whole pairs take Rise + Fall. The fraction plays only that share of the next Rise.
--- Rise 1, Fall 1, Cycles 2.5 ends at 4.5s. Two full pairs, then half of the next Rise.
--- Sticky stays live at any elapsed time. Only Dismiss stops it, and Dismiss does not call this.
--- A negative Rise, Fall, or Cycles counts as 0. A zero Rise adds no time for the fraction.
+-- Whole pairs take Rise + Fall. The fraction is only that share of the next Rise,
+-- and a zero Rise adds no time for it. Rise 1, Fall 1, Cycles 2.5 ends at 4.5s.
+-- Dismiss does not call this.
 ---@param elapsed number|nil
 ---@param rise number|nil
 ---@param fall number|nil

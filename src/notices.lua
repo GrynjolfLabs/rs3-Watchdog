@@ -171,7 +171,6 @@ function Notices:Save()
     if not encodedOk or type(text) ~= "string" then
         return false, text
     end
-    -- False, nil, and a throw leave the previous bytes. A true return is the save.
     local setOk, stored = pcall(function()
         return PersistentDB:SetString(Notices.KEY, text)
     end)
