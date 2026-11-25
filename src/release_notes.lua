@@ -53,9 +53,9 @@ local catalog = {
         },
     },
     {
-        version = "1.0.1",
+        version = "1.1.0",
         paragraphs = {
-            { title = "Watchdog 1.0.1 is out!" },
+            { title = "Watchdog 1.1.0 is out!" },
             "A small one this time. Screen Flash does what the Cycles pin says, Sound Effect can be quieter and repeat, and your old alerts should keep working the way they already do.",
 
             { title = "Screen Flash" },
