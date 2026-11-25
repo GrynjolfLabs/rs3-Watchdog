@@ -73,7 +73,7 @@ Audio shipped inside Watchdog and offered on the Custom Sound node beside pack a
 _Avoid_: Pack audio file, custom audio file, resource
 
 **Alert Preset**:
-A Preset a Pack contributes, offered beside the Preset library while that Pack is registered. It is not a row in that library. The author assigns an author id for that contribution. That author id is not the Preset id. The player adds a copy, which is then an ordinary Alert, and that copy does not keep the author id. Creating an Alert from that copy shows the same chat-permission dialog as creating one from a Preset. The snapshot is a Preset: name, serialized graph, layout, and Variables.
+A Preset a Pack contributes, offered beside the Preset library while that Pack is registered. It is not a row in that library. The author assigns an author id for that contribution. That author id is not the Preset id. The player adds a copy, which is then an ordinary Alert, and that copy does not keep the author id. The copy stays on the alert list. Creating an Alert from that copy shows the same chat-permission dialog as creating one from a Preset. The snapshot is a Preset: name, serialized graph, layout, and Variables.
 _Avoid_: Import (that is the paste-an-export dialog); a second template type; a Preset library row
 
 ## Language
@@ -419,7 +419,7 @@ _Avoid_: Name toggle; the Manager checkbox, which flips one Entry by id
 
 **Preset**:
 A player-saved snapshot of one Alert that can be instantiated into a new Alert. Not an Entry,
-and not tied to the Alerts created from it. Instantiating one shows the chat-permission dialog
+and not tied to the Alerts created from it. The new Alert stays on the alert list. Instantiating one shows the chat-permission dialog
 when the snapshot contains a Game Message trigger, a Player Chat trigger, or a Game Message
 action and chat permission is not granted. The first sentence says this alert includes a Game
 Message or Player Chat node.

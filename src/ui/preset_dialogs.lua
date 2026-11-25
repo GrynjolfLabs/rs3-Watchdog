@@ -38,8 +38,8 @@ end
 ---@field onCreated fun(result: Watchdog.EditorResult)|nil
 
 -- Calls the Variable dialog for a preset that has variables. It does not
--- decide Sound Effect answers itself. onCreated is how main opens the Editor
--- after a create. This dialog does not show the Editor.
+-- decide Sound Effect answers itself. onCreated receives the create result.
+-- This dialog does not show the Editor.
 ---@param parent any
 ---@param opts PresetDialogs.NewAlertOpts|nil
 ---@return nil

@@ -673,7 +673,6 @@ end
 
 -- Saves and arms the Alert the instantiate call inserted. A failed copy or a
 -- failed bake returns the error and leaves the Bucket as that call left it.
----@param scopeKey string
 ---@param doc Watchdog.Bucket
 ---@param key string
 ---@param list Watchdog.RestoredAlert[]|nil
@@ -684,7 +683,7 @@ end
 ---@return Watchdog.EditorResult
 ---@return integer|nil id
 ---@return string|nil err
-function ScopeEdits:_finishCreate(scopeKey, doc, key, list, entry, graph, layout, err)
+function ScopeEdits:_finishCreate(doc, key, list, entry, graph, layout, err)
     if entry == nil or graph == nil or layout == nil then
         return leave(), nil, err
     end
@@ -694,7 +693,7 @@ function ScopeEdits:_finishCreate(scopeKey, doc, key, list, entry, graph, layout
     self:_saveCreated(key, doc, { entry })
     rememberAlert(list, entry.id, entry.name, graph, layout)
     self.runtime:AddAlert(entry.id, entry.name, graph, true, key, entry)
-    return openEditor(scopeKey, entry.id), entry.id, nil
+    return leave(), entry.id, nil
 end
 
 ---@param scopeKey string
@@ -709,7 +708,7 @@ function ScopeEdits:CreateFromPreset(scopeKey, presetId, answers)
     if self.store.ScopeStorage(key) == "unreadable" then
         return leave(), nil, "This scope could not be read."
     end
-    return self:_finishCreate(scopeKey, doc, key, list, PresetCopy.Instantiate(doc, presetId, self.registry, answers))
+    return self:_finishCreate(doc, key, list, PresetCopy.Instantiate(doc, presetId, self.registry, answers))
 end
 
 -- Same save and arm as a library Preset. The registry does not save the Bucket,
@@ -726,7 +725,7 @@ function ScopeEdits:CreateFromAlertPreset(scopeKey, snapshot, answers)
     if self.store.ScopeStorage(key) == "unreadable" then
         return leave(), nil, "This scope could not be read."
     end
-    return self:_finishCreate(scopeKey, doc, key, list, PresetCopy.InstantiateSnapshot(doc, snapshot, self.registry, answers))
+    return self:_finishCreate(doc, key, list, PresetCopy.InstantiateSnapshot(doc, snapshot, self.registry, answers))
 end
 
 return ScopeEdits
