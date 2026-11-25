@@ -33,10 +33,6 @@ local onLoadFailed
 local boundDb
 local indexBlocked = false
 local reportedUnreadable = false
--- Last WD1 token read or written for a key. An equal token skips SetString.
--- Tied to the PersistentDB value so a swapped database does not skip a write
--- that never happened there.
-local tokens = {}
 -- Blank and longer-than-this names are refused. Pack Alert Presets use this same cap.
 Presets.NAME_MAX = 80
 local NAME_MAX = Presets.NAME_MAX
@@ -77,22 +73,13 @@ local function report(message)
     end
 end
 
---- Drops the index refusal and the last-token memory when PersistentDB changes.
+--- Drops the index refusal when PersistentDB changes.
 local function bindDb()
     if boundDb ~= PersistentDB then
         boundDb = PersistentDB
         indexBlocked = false
         reportedUnreadable = false
-        tokens = {}
     end
-end
-
----@param key string
----@param token string|nil
-local function rememberToken(key, token)
-    if type(key) ~= "string" or type(token) ~= "string" or token == "" then return end
-    bindDb()
-    tokens[key] = token
 end
 
 ---@param key string
@@ -190,7 +177,6 @@ end
 ---@param text string
 ---@return Watchdog.PresetDoc doc
 local function loadIndex(text)
-    rememberToken(INDEX_KEY, text)
     local index = decodeToken(text)
     if index == nil or index.version ~= INDEX_VERSION or type(index.presets) ~= "table" then
         blockIndex("presets document unreadable, left on disk")
@@ -207,7 +193,6 @@ local function loadIndex(text)
                 layout = {},
             }
             local got, payloadText = readString(payloadKey(row.id))
-            if got then rememberToken(payloadKey(row.id), payloadText) end
             local payload = got and decodeToken(payloadText) or nil
             -- A payload this build does not understand stays on disk. The index
             -- row stays so a later list edit does not drop it.
@@ -300,8 +285,7 @@ local function encodeToken(payload)
 end
 
 -- False, nil, and a throw leave the previous bytes. A true return is the save.
--- An equal token, matching the last read or last write for this key, skips
--- SetString and still counts as saved. The legacy `presets` key is never passed here.
+-- The legacy `presets` key is never passed here.
 ---@param key string
 ---@param payload table
 ---@return boolean
@@ -311,10 +295,8 @@ local function putToken(key, payload)
     bindDb()
     local token, reason = encodeToken(payload)
     if token == nil then return false, reason or "failed" end
-    if tokens[key] == token then return true end
     local ok, stored = pcall(function() return PersistentDB:SetString(key, token) end)
     if not ok or stored ~= true then return false, "failed" end
-    tokens[key] = token
     return true
 end
 

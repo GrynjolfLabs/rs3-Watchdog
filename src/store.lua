@@ -633,8 +633,6 @@ end
 --- Split keys -------------------------------------------------------------------------------
 -- Document versions sit inside the JSON, after WD1 is removed. The scope tree is
 -- version 3. An alert key is version 1 and the graph keeps the version Serialize wrote.
--- pairs() order is not stable across two tables with the same fields, so the token
--- is encoded with sorted object keys. An unchanged save compares that token.
 
 local SCOPE_DOC_VERSION = 3
 local ALERT_DOC_VERSION = 1
@@ -644,133 +642,29 @@ local ALERT_DOC_VERSION = 1
 -- there is no raw JSON fallback and the caller can say it is too big.
 local STORED_TOKEN_CAP = 131070
 
--- Last token read or written for a key. Compared before SetString so an
--- unchanged save does not write. Tied to the PersistentDB value so a test
--- that swaps the database does not skip a write that never happened.
-local tokenDb
-local tokens = {}
+-- An unreadable key stays blocked for this PersistentDB. A swapped database
+-- starts clear, so a test that replaces PersistentDB is not stuck on the old one.
+local blockedDb
 local blocked = {}
 
----@return table<string, string>
-local function tokenMemory()
-    if tokenDb ~= PersistentDB then
-        tokenDb = PersistentDB
-        tokens = {}
+---@return table<string, boolean>
+local function blockedSet()
+    if blockedDb ~= PersistentDB then
+        blockedDb = PersistentDB
         blocked = {}
     end
-    return tokens
+    return blocked
 end
 
 ---@param storageKey string
 local function blockKey(storageKey)
-    tokenMemory()
-    blocked[storageKey] = true
+    blockedSet()[storageKey] = true
 end
 
 ---@param storageKey string
 ---@return boolean
 local function keyBlocked(storageKey)
-    tokenMemory()
-    return blocked[storageKey] == true
-end
-
----@param storageKey string
----@param token string
-local function rememberToken(storageKey, token)
-    tokenMemory()[storageKey] = token
-end
-
-local jsonEscapes = {
-    ["\""] = "\\\"",
-    ["\\"] = "\\\\",
-    ["\n"] = "\\n",
-    ["\r"] = "\\r",
-    ["\t"] = "\\t",
-    ["\b"] = "\\b",
-    ["\f"] = "\\f",
-}
-
----@param s string
----@return string
-local function encodeString(s)
-    local out = { "\"" }
-    for i = 1, #s do
-        local c = s:sub(i, i)
-        local escaped = jsonEscapes[c]
-        if escaped then
-            out[#out + 1] = escaped
-        elseif c:byte() < 0x20 then
-            out[#out + 1] = string.format("\\u%04x", c:byte())
-        else
-            out[#out + 1] = c
-        end
-    end
-    out[#out + 1] = "\""
-    return table.concat(out)
-end
-
----@param n number
----@return string
-local function encodeNumber(n)
-    if n ~= n or n == math.huge or n == -math.huge then
-        error("cannot encode number")
-    end
-    -- 12 and 12.0 must produce the same token or a reload looks like an edit.
-    if n == math.floor(n) then
-        return string.format("%.0f", n)
-    end
-    return string.format("%.17g", n)
-end
-
----@param t table
----@return boolean
-local function isJsonArray(t)
-    local count = 0
-    for _ in pairs(t) do
-        count = count + 1
-    end
-    if count == 0 then return true end
-    for i = 1, count do
-        if t[i] == nil then return false end
-    end
-    return true
-end
-
----@param value any
----@return string
-local function encodeStable(value)
-    local kind = type(value)
-    if value == nil then
-        return "null"
-    elseif kind == "boolean" then
-        return value and "true" or "false"
-    elseif kind == "number" then
-        return encodeNumber(value)
-    elseif kind == "string" then
-        return encodeString(value)
-    elseif kind == "table" then
-        if isJsonArray(value) then
-            local parts = {}
-            for i = 1, #value do
-                parts[i] = encodeStable(value[i])
-            end
-            return "[" .. table.concat(parts, ",") .. "]"
-        end
-        local keys = {}
-        for k in pairs(value) do
-            if type(k) ~= "string" then
-                error("JSON object keys must be strings")
-            end
-            keys[#keys + 1] = k
-        end
-        table.sort(keys)
-        local parts = {}
-        for i, k in ipairs(keys) do
-            parts[i] = encodeString(k) .. ":" .. encodeStable(value[k])
-        end
-        return "{" .. table.concat(parts, ",") .. "}"
-    end
-    error("cannot encode value of type '" .. kind .. "'")
+    return blockedSet()[storageKey] == true
 end
 
 -- Callers pass `global` or `player_<tracking id>`. The stored name is the
@@ -834,8 +728,13 @@ end
 ---@return boolean
 local function writeToken(storageKey, payload)
     if PersistentDB == nil then return false end
-    local encoded, json = pcall(encodeStable, payload)
-    if not encoded then
+    local c = codec()
+    if c == nil then
+        if log ~= nil then log("Watchdog: failed to encode bucket for save") end
+        return false, "failed"
+    end
+    local encoded, json = pcall(function() return c.encode(payload) end)
+    if not encoded or type(json) ~= "string" then
         if log ~= nil then log("Watchdog: failed to encode bucket for save") end
         return false, "failed"
     end
@@ -843,9 +742,6 @@ local function writeToken(storageKey, payload)
     if not compressed or type(token) ~= "string" then
         if log ~= nil then log("Watchdog: failed to save bucket '" .. storageKey .. "'") end
         return false, "failed"
-    end
-    if tokenMemory()[storageKey] == token then
-        return true
     end
     if #token > STORED_TOKEN_CAP then
         if log ~= nil then log("Watchdog: failed to save bucket '" .. storageKey .. "'") end
@@ -857,7 +753,6 @@ local function writeToken(storageKey, payload)
         if log ~= nil then log("Watchdog: failed to save bucket '" .. storageKey .. "'") end
         return false, "failed"
     end
-    rememberToken(storageKey, token)
     return true
 end
 
@@ -877,7 +772,6 @@ local function attachAlertGraphs(identity, entries)
             end
             local payload = got and decodeToken(text) or nil
             if payload ~= nil and payload.version == ALERT_DOC_VERSION and type(payload.graph) == "table" then
-                rememberToken(key, text)
                 entry.graph = payload.graph
                 entry.layout = payload.layout
             elseif key ~= nil and (not got or (type(text) == "string" and text ~= "")) then
@@ -905,18 +799,15 @@ local function scopeIsFrozen(key)
         return true
     end
     if type(text) ~= "string" or text == "" then return false end
-    if tokenMemory()[key] == text then return false end
     local payload = decodeToken(text)
     if payload ~= nil and payload.version == SCOPE_DOC_VERSION and type(payload.entries) == "table" then
-        rememberToken(key, text)
         return false
     end
     blockKey(key)
     return true
 end
 
--- True is the only success. False, nil, and a throw leave the key. The
--- remembered token is dropped so the next alert that reuses this id is written.
+-- True is the only success. False, nil, and a throw leave the key.
 ---@param identity string
 ---@param id integer
 ---@return boolean
@@ -930,8 +821,7 @@ local function deleteStoredAlert(identity, id)
         end
         return false
     end
-    tokenMemory()[key] = nil
-    blocked[key] = nil
+    blockedSet()[key] = nil
     return true
 end
 
@@ -1113,7 +1003,6 @@ function Store.LoadScope(identity)
         blockKey(key)
         return Store.Empty(), nil, "unreadable"
     end
-    rememberToken(key, text)
     attachAlertGraphs(identity, payload.entries)
     stripEntryNames(payload.entries)
     migrateSavedGraphs(payload.entries)

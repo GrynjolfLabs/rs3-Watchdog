@@ -1233,39 +1233,16 @@ function TestStore:testTheSameAlertIdInTwoScopesIsTwoKeys()
     luaunit.assertNil(y)
 end
 
-function TestStore:testUnchangedScopeAndAlertTokensSkipTheWrite()
+function TestStore:testAScopeRenameLeavesTheAlertKey()
     local doc = Store.Empty()
     local id = seedAlert(self, doc, "alpha", true)
-    local writes = {}
-    local inner = PersistentDB.SetString
-    function PersistentDB:SetString(key, value)
-        writes[key] = (writes[key] or 0) + 1
-        return inner(self, key, value)
-    end
-
     luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
     luaunit.assertTrue(Store.SaveScope("global", doc))
-    luaunit.assertEquals(writes["scope_global_alert_" .. id], 1)
-    luaunit.assertEquals(writes.scope_global, 1)
-
-    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
-    luaunit.assertTrue(Store.SaveScope("global", doc))
-    luaunit.assertEquals(writes["scope_global_alert_" .. id], 1)
-    luaunit.assertEquals(writes.scope_global, 1)
-
     local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
     doc.entries[1].name = "renamed"
     luaunit.assertTrue(Store.SaveScope("global", doc))
     luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
     luaunit.assertEquals(decodeToken(PersistentDB:GetString("scope_global")).entries[1].name, "renamed")
-    luaunit.assertEquals(writes.scope_global, 2)
-
-    writes = {}
-    local loaded = Store.LoadScope("global")
-    luaunit.assertTrue(Store.SaveScope("global", loaded))
-    luaunit.assertTrue(Store.SaveAlert("global", loaded.entries[1]))
-    luaunit.assertNil(writes.scope_global)
-    luaunit.assertNil(writes["scope_global_alert_" .. id])
 end
 
 function TestStore:testATokenOverTheCapIsRefusedBeforeTheWrite()
@@ -1911,7 +1888,7 @@ function TestStore:testAScopeTreeThatDoesNotFitIsRefusedEveryTime()
     luaunit.assertFalse(ok)
     luaunit.assertEquals(reason, "size")
     luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
-    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_1"), alertBefore)
+    luaunit.assertEquals(decodeToken(PersistentDB:GetString("scope_global_alert_1")).graph, decodeToken(alertBefore).graph)
     luaunit.assertEquals(PersistentDB:GetString("global"), legacy)
 
     ok, reason = Store.PersistScope("global", loaded)
@@ -2302,14 +2279,6 @@ function TestStore:testAMoveThatRemintsDeletesTheOldIdAndKeepsTheDestinationId()
     luaunit.assertEquals(destination.entries[2].graph.nodes[1].name, "from global")
 end
 
--- A fresh PersistentDB drops the last-token memory. An unchanged graph would
--- still be written, so a whole-bucket save shows up as extra keys.
-local function forgetTokenMemory()
-    local data = PersistentDB.data
-    PersistentDB = newFakePersistentDB()
-    PersistentDB.data = data
-end
-
 function TestStore:testAnEditedAlertOnASplitScopeWritesOnlyThatKey()
     local doc = Store.Empty()
     local kept = seedAlert(self, doc, "Kept", true)
@@ -2319,7 +2288,6 @@ function TestStore:testAnEditedAlertOnASplitScopeWritesOnlyThatKey()
     luaunit.assertTrue(Store.SaveScope("global", doc))
     local keptBytes = PersistentDB:GetString("scope_global_alert_" .. kept)
     local scopeBytes = PersistentDB:GetString("scope_global")
-    forgetTokenMemory()
     doc.entries[2].graph.nodes[1].controls = { text = "edited" }
     local writes = {}
     local inner = PersistentDB.SetString
@@ -2339,28 +2307,6 @@ function TestStore:testAnEditedAlertOnASplitScopeWritesOnlyThatKey()
     luaunit.assertEquals(loaded.entries[1].name, "Kept")
     luaunit.assertEquals(loaded.entries[1].graph.nodes[1].type, "fixture.trigger")
     luaunit.assertEquals(loaded.entries[2].graph.nodes[1].controls.text, "edited")
-end
-
-function TestStore:testSavingTheAlertThatWasJustReadWritesNothing()
-    local doc = Store.Empty()
-    local id = seedAlert(self, doc, "Horn", true)
-    luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
-    luaunit.assertTrue(Store.SaveScope("global", doc))
-    local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
-    local scopeBefore = PersistentDB:GetString("scope_global")
-    local loaded = Store.LoadScope("global")
-    local writes = 0
-    local inner = PersistentDB.SetString
-    function PersistentDB:SetString(key, value)
-        writes = writes + 1
-        return inner(self, key, value)
-    end
-
-    luaunit.assertTrue(Store.SaveEditedAlert("global", loaded, loaded.entries[1]))
-
-    luaunit.assertEquals(writes, 0)
-    luaunit.assertEquals(PersistentDB:GetString("scope_global_alert_" .. id), alertBefore)
-    luaunit.assertEquals(PersistentDB:GetString("scope_global"), scopeBefore)
 end
 
 function TestStore:testAnEditWhileTheNewScopeKeyIsAbsentStoresEveryAlert()
@@ -2389,7 +2335,6 @@ function TestStore:testMovingTheInfoboxWritesOnlyTheGlobalTree()
     luaunit.assertTrue(Store.SaveAlert("global", doc.entries[1]))
     luaunit.assertTrue(Store.SaveScope("global", doc))
     local alertBefore = PersistentDB:GetString("scope_global_alert_" .. id)
-    forgetTokenMemory()
     Store.SetInfoBoxAnchor(doc, 8, 9)
     local writes = {}
     local inner = PersistentDB.SetString

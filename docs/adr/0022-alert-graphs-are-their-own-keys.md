@@ -18,7 +18,7 @@ Startup lists the plugin's keys and migrates `global`, `presets`, and every `pla
 
 A scope migrates all at once. Alert keys are written first. The new scope key is written only after every one of those tokens is stored. If one token is over the cap, the size dialog names that alert, the new key stays absent, and the legacy key is not written. Quitting drops the in-memory edits. A scope that contains an alert which cannot be shrunk under the cap does not finish migration.
 
-`SaveAlert` takes the scope identity and that alert and writes only that alert key. `SaveScope` writes the index and does not walk graphs. Create, import, and a move call `SaveAlert` for each alert they changed, then `SaveScope`. `SavePreset` writes that preset key. A library-list change writes the preset index. An unchanged `WD1` token is not written. The infobox anchor stays on `scope_global`.
+`SaveAlert` takes the scope identity and that alert and writes only that alert key. `SaveScope` writes the index and does not walk graphs. Create, import, and a move call `SaveAlert` for each alert they changed, then `SaveScope`. `SavePreset` writes that preset key. A library-list change writes the preset index. A repeat save of the same payload writes again. The infobox anchor stays on `scope_global`.
 
 `SaveScope` omits graph and layout. It still writes when the tree is empty. `scope_global`, `scope_player_<tracking id>`, and `scope_presets` are never deleted and never set to an empty string. That empty write happens only after this session read the scope successfully, or after a legacy document that really had no alerts.
 
