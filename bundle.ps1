@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Bundles Watchdog (and, for dev zips, its required plugin dependencies) into a zip.
+    Bundles Watchdog into a zip. The default dev zip is Watchdog only. -Bundle also includes required plugin dependencies.
 
 .DESCRIPTION
     Stages the same "core" file set as .vscode/deploy.ps1: plugin.json (if present),
@@ -12,19 +12,24 @@
     plugins (Watchdog, LibNodeGraph, LibNodeGraphStd, RestrictedAreas) and those Lua files are
     rewritten by scripts/minify.lua instead. prettyui is never minified.
 
-    Default (dev) layout mirrors the live client: one top-level folder per plugin
-    (Watchdog/, LibNodeGraph/, …). Required dependencies are an identifier-to-folder
-    map; this script stages the folder names and does not invent numeric ids.
+    Default (dev) layout is one folder, Watchdog/, using plugin.json. The
+    required dependency folders are not staged.
 
-    With -Modio: Watchdog files only, no dependency folders, zip entries at the
-    archive root (main.lua, plugin.json, …). plugin.modio.json is staged as
-    plugin.json. Default filename is Watchdog-<version>-modio.zip so it does
-    not collide with the dev zip.
+    With -Bundle: the same dev layout, plus one folder per required dependency
+    (LibNodeGraph/, …). Required dependencies are an identifier-to-folder map;
+    this script stages the folder names and does not invent numeric ids.
+    Default filename is Watchdog-<version>-bundle.zip so it does not collide
+    with the Watchdog-only dev zip.
+
+    With -Modio: Watchdog files only, zip entries at the archive root
+    (main.lua, plugin.json, …). plugin.modio.json is staged as plugin.json.
+    Default filename is Watchdog-<version>-modio.zip so it does not collide
+    with the dev zip.
 
 .PARAMETER Output
-    Path for the output zip. Defaults to Watchdog-<version>.zip (dev) or
-    Watchdog-<version>-modio.zip (-Modio) beside this script, where <version>
-    comes from the manifest in use.
+    Path for the output zip. Defaults to Watchdog-<version>.zip (dev),
+    Watchdog-<version>-bundle.zip (-Bundle), or Watchdog-<version>-modio.zip
+    (-Modio) beside this script, where <version> comes from the manifest in use.
 
 .PARAMETER Minify
     Minify staged Lua via scripts/minify.lua instead of naive comment stripping,
@@ -33,19 +38,28 @@
 .PARAMETER Modio
     Produce a mod.io zip: Watchdog-only, flat layout, plugin.modio.json as plugin.json.
 
+.PARAMETER Bundle
+    Dev zip that also stages each required dependency folder beside Watchdog/.
+
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File bundle.ps1
     powershell -NoProfile -ExecutionPolicy Bypass -File bundle.ps1 -Output dist/Watchdog-custom.zip
     powershell -NoProfile -ExecutionPolicy Bypass -File bundle.ps1 -Minify
+    powershell -NoProfile -ExecutionPolicy Bypass -File bundle.ps1 -Bundle
     powershell -NoProfile -ExecutionPolicy Bypass -File bundle.ps1 -Modio
 #>
 param(
     [string]$Output,
     [switch]$Minify,
-    [switch]$Modio
+    [switch]$Modio,
+    [switch]$Bundle
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($Modio -and $Bundle) {
+    throw "Pass -Modio or -Bundle, not both."
+}
 
 $watchdogDir = $PSScriptRoot
 $rs3Root = Split-Path -Parent $watchdogDir
@@ -291,7 +305,9 @@ function Get-RequiredFolderNames {
 
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $plugins = @()
-if (-not $Modio) {
+# The default zip is this repo alone. -Bundle needs the sibling dependency
+# folders. -Modio is a flat Watchdog zip and never stages those folders.
+if ($Bundle) {
     $plugins += @(Get-RequiredFolderNames $manifest.requiredDependencies)
 }
 $plugins += $pluginName
@@ -311,7 +327,7 @@ try {
 
     if (-not $Output) {
         $version = if ($manifest.version) { $manifest.version } else { 'unknown' }
-        $suffix = if ($Modio) { '-modio' } else { '' }
+        $suffix = if ($Modio) { '-modio' } elseif ($Bundle) { '-bundle' } else { '' }
         $Output = Join-Path $watchdogDir "Watchdog-$version$suffix.zip"
     }
     $Output = [System.IO.Path]::GetFullPath($Output)

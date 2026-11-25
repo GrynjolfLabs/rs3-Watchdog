@@ -28,16 +28,7 @@ jobs:
           echo "plugin_name=${REPO_NAME#rs3-}" >> "$GITHUB_OUTPUT"
 
       - name: Package plugin
-        run: |
-          PLUGIN_NAME="${{ steps.vars.outputs.plugin_name }}"
-          STAGE="staging/$PLUGIN_NAME"
-          mkdir -p "$STAGE"
-          [ -f plugin.json ] && cp plugin.json "$STAGE/"
-          find . -path ./staging -prune -o -path ./tests -prune -o -path ./docs -prune -o -path ./.git -prune -o -name '*.lua' -print | while read -r f; do
-            mkdir -p "$STAGE/$(dirname "$f")"
-            cp "$f" "$STAGE/$f"
-          done
-          (cd staging && zip -r "../$PLUGIN_NAME.zip" "$PLUGIN_NAME")
+        run: pwsh -NoProfile -File ./bundle.ps1 -Output "${{ steps.vars.outputs.plugin_name }}.zip"
 
       - name: Upload plugin zip
         uses: actions/upload-artifact@v4

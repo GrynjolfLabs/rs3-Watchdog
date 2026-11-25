@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Bundle: Watchdog + dependencies",
+      "label": "Bundle: Watchdog",
       "group": "build",
       "type": "shell",
       "command": "powershell",
@@ -12,6 +12,26 @@
         "Bypass",
         "-File",
         "${workspaceFolder}/bundle.ps1"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "Bundle: Watchdog + dependencies",
+      "group": "build",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/bundle.ps1",
+        "-Bundle"
       ],
       "problemMatcher": [],
       "presentation": {
