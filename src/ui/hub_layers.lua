@@ -6,8 +6,9 @@
 -- ContentLayerReady registers Toggle, which opens the manager, Reset All
 -- Popups, which clears one-shot notices, and Reset Positions, which puts the
 -- infobox and toasts back at their defaults. While RestrictedAreas reports
--- Restricted, a line under the buttons reads "In Restricted Area" in red,
--- with a description under it. Otherwise the panel is only the buttons.
+-- Restricted and this panel is the one on screen, a line under the buttons
+-- reads "In Restricted Area" in red, with a description under it. Otherwise
+-- the panel is only the buttons.
 
 local Notices = require("src/notices")
 
@@ -209,11 +210,27 @@ local function addLine(parent, y, h, text, maxLines)
     return line
 end
 
--- The title and description exist only while Restricted. A second true leaves
--- both widgets in place so walking between Restricted areas does not flicker them.
+-- Nothing fires when the plugins window closes or another plugin takes this
+-- layer. The Toggle button's parent and visibleGlobal are the remaining signal.
+-- A button the client already destroyed throws on field access.
+local function contentPanelShowing()
+    if contentToggleButton == nil or contentParent == nil then return false end
+    local ok, showing = pcall(function()
+        if contentToggleButton.destroyed == true then return false end
+        if contentToggleButton.parent ~= contentParent then return false end
+        if contentParent.visibleGlobal == false then return false end
+        if contentToggleButton.visibleGlobal == false then return false end
+        return true
+    end)
+    return ok and showing == true
+end
+
+-- The title and description exist only while Restricted and this panel is
+-- showing. A second true leaves both widgets in place so walking between
+-- Restricted areas does not flicker them.
 ---@param restricted boolean
 local function paintRestricted(restricted)
-    if contentParent == nil then return end
+    if not contentPanelShowing() then return end
     if restricted then
         if contentLine ~= nil and contentDetail ~= nil then
             contentLine.content = RESTRICTED_LINE
@@ -415,8 +432,7 @@ function HubLayers.Bind(onToggle)
             toggleFromButton = false
         end)
     end)
-    -- Reload of an optional dependency swaps the global. Only the open panel
-    -- follows it; a closed panel must not subscribe and keep that plugin ticking.
+    -- Reload swaps the global. Resubscribe if this panel has been filled.
     Event.OptionalDependencyChanged.Subscribe(DEPENDENCY_EVENT, function(dep)
         if contentParent == nil then return end
         local kind = type(dep)

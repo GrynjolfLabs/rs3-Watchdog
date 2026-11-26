@@ -511,6 +511,85 @@ function TestContentLayer:testRestrictedAreasIsARequiredDependency()
     luaunit.assertNil(optional:find("RestrictedAreas", 1, true))
 end
 
+function TestContentLayer:hidePanel()
+    self.parent.visibleGlobal = false
+end
+
+function TestContentLayer:showPanel()
+    self.parent.visibleGlobal = true
+end
+
+-- The client removes the previous plugin's widgets before presenting another.
+function TestContentLayer:clientTakesContent()
+    local kept = self.parent.children
+    for _, child in ipairs(kept) do
+        child.parent = nil
+    end
+    self.parent.children = {}
+    return kept
+end
+
+function TestContentLayer:testHiddenPanelShowsTheLineOnTheNextRestrictedEvent()
+    self:installAreas(false)
+    self:showContent()
+    local name = self:listenerName()
+    self:hidePanel()
+    self:callback()(true)
+    luaunit.assertEquals(self:texts(), {})
+    luaunit.assertNotNil(_G.RestrictedAreas.listeners[name])
+    luaunit.assertEquals(#live(self.parent, "button"), 3)
+    self:showPanel()
+    self:callback()(true)
+    self:assertRestrictedCopy(self:texts())
+end
+
+function TestContentLayer:testLeavingRestrictedWhileHiddenWaitsUntilShown()
+    self:installAreas(true)
+    self:showContent()
+    local line = self:texts()[1]
+    local detail = self:texts()[2]
+    self:hidePanel()
+    self:callback()(false)
+    luaunit.assertFalse(line.destroyed)
+    luaunit.assertFalse(detail.destroyed)
+    self:assertRestrictedCopy(self:texts())
+    self:showPanel()
+    self:callback()(false)
+    luaunit.assertEquals(self:texts(), {})
+    luaunit.assertTrue(line.destroyed)
+    luaunit.assertTrue(detail.destroyed)
+end
+
+function TestContentLayer:testOtherPluginPanelDoesNotGainTheRestrictedLine()
+    self:installAreas(false)
+    self:showContent()
+    local name = self:listenerName()
+    local kept = self:clientTakesContent()
+    self:callback()(true)
+    luaunit.assertEquals(self.parent.children, {})
+    luaunit.assertNotNil(_G.RestrictedAreas.listeners[name])
+    for _, child in ipairs(kept) do
+        luaunit.assertFalse(child.destroyed)
+    end
+    _G.RestrictedAreas.answer = true
+    self:showContent()
+    self:assertRestrictedCopy(self:texts())
+    luaunit.assertEquals(#live(self.parent, "button"), 3)
+end
+
+function TestContentLayer:testRestrictedCallbackOnAnotherPluginDoesNotPaint()
+    self:installAreas(true)
+    self:showContent()
+    local name = self:listenerName()
+    local kept = self:clientTakesContent()
+    self:callback()(false)
+    luaunit.assertEquals(self.parent.children, {})
+    for _, child in ipairs(kept) do
+        luaunit.assertFalse(child.destroyed)
+    end
+    luaunit.assertNotNil(_G.RestrictedAreas.listeners[name])
+end
+
 function TestContentLayer:testStayingRestrictedKeepsTheSameLine()
     self:installAreas(true)
     self:showContent()
