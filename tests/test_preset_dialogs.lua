@@ -519,6 +519,7 @@ function TestNewAlertDialog:testFromScratchReportsOpen()
         onCreated = function(result) opened = result end,
     })
     self:button(self.windows[1], "From scratch").action()
+    luaunit.assertEquals(self.windows[1].destroyed, true)
     luaunit.assertEquals(opened.kind, "open")
     luaunit.assertEquals(opened.scopeKey, "global")
     luaunit.assertEquals(opened.alertId, 4)
@@ -603,6 +604,7 @@ function TestNewAlertDialog:testPresetWithAGameMessageNodeWarnsWhenChatPermissio
     })
     self:row("Drops").action()
     luaunit.assertEquals(created, 1)
+    luaunit.assertEquals(self.windows[1].destroyed, true)
     local notice = self.windows[#self.windows]
     luaunit.assertEquals(notice.title, "Chat permission")
     luaunit.assertEquals(notice.texts[1], "This alert includes a Game Message or Player Chat node.")
@@ -627,6 +629,7 @@ function TestNewAlertDialog:testPresetWithoutAChatNodeDoesNotWarn()
     })
     self:row("Quiet").action()
     luaunit.assertEquals(#self.windows, 1)
+    luaunit.assertEquals(self.windows[1].destroyed, true)
 end
 
 function TestNewAlertDialog:testGrantedChatPermissionSkipsThePresetNotice()
@@ -647,6 +650,7 @@ function TestNewAlertDialog:testGrantedChatPermissionSkipsThePresetNotice()
     })
     self:row("Talk").action()
     luaunit.assertEquals(#self.windows, 1)
+    luaunit.assertEquals(self.windows[1].destroyed, true)
 end
 
 function TestNewAlertDialog:testFailedPresetCreateDoesNotWarn()
@@ -667,6 +671,7 @@ function TestNewAlertDialog:testFailedPresetCreateDoesNotWarn()
     })
     self:row("Say").action()
     luaunit.assertEquals(#self.windows, 1)
+    luaunit.assertNil(self.windows[1].destroyed)
 end
 
 function TestNewAlertDialog:testAlertPresetWithAChatNodeWarnsWhenChatPermissionIsOff()
@@ -693,6 +698,7 @@ function TestNewAlertDialog:testAlertPresetWithAChatNodeWarnsWhenChatPermissionI
     })
     self:row("Drop call").action()
     luaunit.assertEquals(created, 1)
+    luaunit.assertEquals(self.windows[1].destroyed, true)
     luaunit.assertEquals(self.windows[#self.windows].title, "Chat permission")
     luaunit.assertEquals(self.windows[#self.windows].texts[1], "This alert includes a Game Message or Player Chat node.")
 end
@@ -724,6 +730,8 @@ function TestNewAlertDialog:testVariablePresetWarnsOnlyAfterTheAlertIsCreated()
     luaunit.assertEquals(self.windows[2].title, "Marked")
     self:button(self.windows[2], "Create").action()
     luaunit.assertEquals(created, 1)
+    luaunit.assertEquals(self.windows[1].destroyed, true)
+    luaunit.assertEquals(self.windows[2].destroyed, true)
     luaunit.assertEquals(self.windows[#self.windows].title, "Chat permission")
 end
 

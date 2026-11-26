@@ -76,7 +76,7 @@ function EditorHelp.fill(win)
         "Only an unconnected text, number, dropdown, or matcher pin can be marked. Wired pins and exec pins are skipped.",
         "You can save with nothing marked. Every alert you make from it is an exact copy.",
         "On the alert list, + New alert opens your presets. Presets that came with a pack are listed under the pack name.",
-        "Click a preset to create an alert from it. The new alert stays on the list. If you marked pins, fill them in and click Create. From scratch makes a blank alert and opens it.",
+        "Click a preset to create an alert from it. The dialog closes. If you marked pins, fill them in and click Create. From scratch makes a blank alert and opens it.",
     })
 
     section(win, "More nodes", {

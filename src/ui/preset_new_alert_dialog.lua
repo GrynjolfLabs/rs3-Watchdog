@@ -30,6 +30,7 @@ function PresetNewAlertDialog.mountNewAlert(parent, opts)
     local feedback
     local body = {}
     local alertWin
+    local alertDialog
     local fillList, beginRename, beginDelete
 
     -- Captured at this open. A later registration does not rebuild an open dialog.
@@ -43,6 +44,9 @@ function PresetNewAlertDialog.mountNewAlert(parent, opts)
     local function deliver(result, id, err, graph)
         if id == nil then return nil, err end
         if opts.onCreated ~= nil then opts.onCreated(result) end
+        if alertDialog ~= nil then
+            pcall(function() alertDialog:Destroy() end)
+        end
         if ChatPermission.GraphRequires(graph) and not ChatPermission.Granted() then
             ChatPermissionNotice.mount(parent, "This alert includes a Game Message or Player Chat node.")
         end
@@ -261,7 +265,7 @@ function PresetNewAlertDialog.mountNewAlert(parent, opts)
         feedback = remember(host:AddText(""))
     end
 
-    Dialog.mount(parent, {
+    alertDialog = Dialog.mount(parent, {
         title = "New alert",
         width = 400,
         height = 420,
