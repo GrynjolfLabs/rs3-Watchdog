@@ -55,6 +55,7 @@ local catalog = {
     {
         version = "1.1.0",
         paragraphs = {
+            { title = "Watchdog 1.1.0 comes out swinging!" },
             "Thank you for trying Watchdog and for all the feedback since 1.0.0. This update makes saving safer, gives you more control over Screen Flash and Sound Effect, and smooths out a few rough edges.",
 
             { title = "Saving" },
