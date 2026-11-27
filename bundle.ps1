@@ -256,9 +256,10 @@ function Stage-Plugin {
         [switch]$Flat
     )
 
-    $srcDir = Join-Path $rs3Root $Name
+    # Checkout directory is not always named Watchdog (Actions uses rs3-Watchdog).
+    $srcDir = if ($Name -eq $pluginName) { $watchdogDir } else { Join-Path $rs3Root $Name }
     if (-not (Test-Path -LiteralPath $srcDir -PathType Container)) {
-        throw "Dependency folder not found: $srcDir"
+        throw "Folder not found: $srcDir"
     }
 
     $files = Get-PluginDeployFiles $srcDir
