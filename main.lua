@@ -913,6 +913,9 @@ Event.KeyDown.Subscribe(Events.KeyDown, function(keyEvent)
         -- end
         return
     end
+    if mux ~= nil and mux:IsVisible() and mux:IsTop("editor") and editor:HandleKey(keyEvent) then
+        return
+    end
     local keys = HubLayers.ShellKeys()
     local pressed = keyEvent.gameKey
     local bound = false

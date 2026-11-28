@@ -220,6 +220,24 @@ auto-connects the chosen Node's matching Pin. The typed, one-gesture creation pa
 to the unfiltered double-click / toolbar-+ path).
 _Avoid_: Pull-to-create, drag-off, quick-connect
 
+**Node Selection**:
+The Nodes the Editor highlights and the edit actions use. Click selects one, Shift+click adds or
+removes one, and Shift+drag on empty Viewport draws a box that adds every Node it touches.
+Dragging a selected Node moves them all. `Editor.selected` is the last one clicked.
+_Avoid_: Selection (that is the Manager's checked Entries)
+
+**Node Clipboard**:
+A Node Snapshot of copied Nodes held in plugin memory (the client has no clipboard API), shared
+by every Alert until a reload. Paste puts it under the cursor with new ids; wires to Nodes outside
+the copy, placeholders, and Unavailable types are left out.
+_Avoid_: Import/Export (that is whole Alerts)
+
+**Edit History**:
+Undo and redo for the bound Alert, one whole Node Snapshot per step (ADR-0021). Starts empty on
+every bind. The edit toolbar at the Viewport's top left and Ctrl+Z/Y/X/C/V and Delete run the
+edit actions; the keys only act with the cursor over the Editor, because the game also gets them.
+_Avoid_: Undo stack, revision
+
 **Control Box**:
 The small value box the Editor draws on an unconnected data-input Pin's row, showing that
 Pin's Control (the engine's stored value for the Pin). It is Canvas-drawn like everything

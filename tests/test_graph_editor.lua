@@ -16,6 +16,7 @@ local Graph = require("graph")
 local Serialize = require("serialize")
 local Editor = require("src/ui/graph")
 local View = require("src/ui/view")
+local EditToolbar = require("src/ui/edit_toolbar")
 
 TestGraphEditor = {}
 
@@ -132,7 +133,7 @@ function TestGraphEditor:testBindEntryBindsGraphAndResetsView()
     luaunit.assertIs(editor.graph, self.graph)
     luaunit.assertIs(editor:GetLayout(), layout)
     luaunit.assertEquals(editor.view.panX, 0)
-    luaunit.assertEquals(editor.view.panY, 0)
+    luaunit.assertEquals(editor.view.panY, EditToolbar.Bottom() + 8) -- clear of the edit toolbar
     luaunit.assertEquals(editor.view.zoom, 1.0)
     luaunit.assertNil(editor.selected)
     luaunit.assertEquals(editor.nodeOrder, {})
@@ -337,12 +338,12 @@ function TestGraphEditor:testApplyZoomIndexKeepsViewCenterGraphStable()
     luaunit.assertAlmostEquals(gy2, gy, 1e-12)
 end
 
-function TestGraphEditor:testOnResetViewZerosPanAndDefaultZoom()
+function TestGraphEditor:testOnResetViewHomesPanBelowTheToolbarAndDefaultZoom()
     local editor = Editor.new(self.registry, nil)
     editor.view.panX, editor.view.panY, editor.view.zoom = 123, 45, 2.0
     editor:onResetView()
     luaunit.assertEquals(editor.view.panX, 0)
-    luaunit.assertEquals(editor.view.panY, 0)
+    luaunit.assertEquals(editor.view.panY, EditToolbar.Bottom() + 8)
     luaunit.assertEquals(editor.view.zoom, 1.0)
     luaunit.assertEquals(View.Rungs()[View.RungIndex(editor.view.zoom)], 1.0)
 end
@@ -522,9 +523,11 @@ function TestGraphEditor:testPlaceFromPlusCentersNodeBodyOnViewCenter()
     local id = editor.selected
     luaunit.assertNotNil(id)
     local pos = editor.layout[id]
-    -- 400x300 center is 200, 150. A 250x68 body centered there sits at 75, 116.
+    -- 400x300 center is 200, 150. The home view starts graph y = 0 below the edit
+    -- toolbar, so that center is graph 200, 150 - clearance. A 250x68 body centered
+    -- there sits at 75, 116 - clearance.
     luaunit.assertEquals(pos.x, 75)
-    luaunit.assertEquals(pos.y, 116)
+    luaunit.assertEquals(pos.y, 116 - (EditToolbar.Bottom() + 8))
 end
 
 -- Centering runs first. Anchor 126.5, 34.5 puts the body at 1.5, 0.5, which the player sees as 2, 1.
@@ -645,6 +648,7 @@ function TestGraphEditor:testDragFollowsTheCursorUntilReleaseRoundsTheLayout()
     local editor = Editor.new(self.registry, nil)
     local id = self.graph:AddNode("fixture.trigger")
     editor:BindEntry(1, self.graph, { [id] = { x = 10, y = 20 } })
+    editor.view.panY = 0 -- graph space equals content space; the home view offset is not under test
     editor.visible = true
     editor:buildGeoms()
 
@@ -680,6 +684,7 @@ function TestGraphEditor:testHeldClickDoesNotFlingTheNodeWhenCaptureExpands()
     local editor = Editor.new(self.registry, nil)
     local id = self.graph:AddNode("fixture.trigger")
     editor:BindEntry(1, self.graph, { [id] = { x = 10, y = 20 } })
+    editor.view.panY = 0 -- graph space equals content space; the home view offset is not under test
     editor.visible = true
     editor.window.x, editor.window.y = 270, 108
     editor:buildGeoms()

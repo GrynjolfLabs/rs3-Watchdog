@@ -14,6 +14,16 @@ local IfaceScale = require("src/ui/iface_scale")
 local InvViewer = require("src/ui/inv_viewer")
 local NumberSpinner = require("src/ui/widgets/number_spinner")
 local Util = require("src/util")
+local Confirm = require("src/ui/confirm")
+local Gates = require("src/nodes/gates")
+local NodeSnapshot = require("src/ui/node_snapshot")
+local EditHistory = require("src/ui/edit_history")
+local EditToolbar = require("src/ui/edit_toolbar")
+local EditorKeys = require("src/ui/editor_keys")
+
+local HISTORY_TICKS = 5                       -- Logic ticks between history checks
+local PASTE_STEP = 20                         -- offset of each repeat paste at the same spot
+local HOME_PAN_Y = EditToolbar.Bottom() + 8   -- the home view starts graph y = 0 below the toolbar
 
 local Editor = {}
 Editor.__index = Editor
@@ -36,9 +46,16 @@ function Editor.new(registry, runtime)
         captureOriginX = nil,      -- hook-batch origin; hold runs after expandCapture
         captureOriginY = nil,
         pressed = false,
-        mode = "idle",             -- idle | pan | dragnode | wire | colordrag | palettescroll
+        mode = "idle",             -- idle | pan | dragnode | wire | colordrag | palettescroll | marquee
         editing = nil,             -- {nodeId,pinName,spec,widget,field}
-        selected = nil,
+        selected = nil,            -- primary node: the last one clicked, always in `selection`
+        selection = {},            -- nodeId -> true
+        dragOffsets = nil,         -- nodeId -> {dx, dy} while a group drag is held
+        marquee = nil,             -- {x0,y0,x1,y1,base} content-local while Shift+dragging
+        history = EditHistory.new(),
+        historyTick = 0,
+        lastPaste = nil,           -- {gx, gy, count} to step repeat pastes
+        editToolbar = EditToolbar.new(),
         visible = false,
         palette = Palette.new(),
         colorPopup = ColorPopup.new(),
@@ -90,13 +107,18 @@ function Editor:BindEntry(id, graph, layout, name)
     self.geoms = {}
     self.nodeOrder = {}
     self.selected = nil
+    self.selection = {}
     self.editing = nil
     self.pressed = false
     self.mode = "idle"
     self.wire = nil
     self.dragNodeId = nil
+    self.dragOffsets = nil
+    self.marquee = nil
+    self.lastPaste = nil
     self:resetView()
     InvViewer.DestroyAll(self)
+    self:resetHistory()
 end
 
 -- Flush pending edits before dropping the graph.
@@ -111,14 +133,20 @@ function Editor:Unbind()
     self.geoms = {}
     self.nodeOrder = {}
     self.selected = nil
+    self.selection = {}
+    self.dragOffsets = nil
+    self.marquee = nil
+    self.history:Reset(nil)
 end
 
--- A save reads this. Round every live point except the node being dragged.
+-- A save reads this. Round every live point except the nodes being dragged.
 -- layoutToArray copies a new number, so that drag is not snapped.
 ---@return Watchdog.Layout
 function Editor:GetLayout()
     for id, pos in pairs(self.layout) do
-        if id ~= self.dragNodeId then
+        local dragging = id == self.dragNodeId
+            or (self.dragOffsets ~= nil and self.dragOffsets[id] ~= nil)
+        if not dragging then
             pos.x = Util.RoundHalfAway(pos.x)
             pos.y = Util.RoundHalfAway(pos.y)
         end
@@ -557,6 +585,62 @@ function Editor:bringToFront(nodeId)
     self.nodeOrder[#self.nodeOrder + 1] = nodeId
 end
 
+--- Selection: `selection` is the set the canvas highlights and the edit actions use;
+--- `selected` is the primary node inside it (the last one clicked).
+
+function Editor:isSelected(nodeId)
+    return self.selection ~= nil and self.selection[nodeId] == true
+end
+
+function Editor:clearSelection()
+    self.selection, self.selected = {}, nil
+end
+
+function Editor:selectOnly(nodeId)
+    self.selection, self.selected = { [nodeId] = true }, nodeId
+end
+
+-- Keeps the selection when the node is in it, so a drag moves the whole selection.
+function Editor:focusNode(nodeId)
+    if self:isSelected(nodeId) then self.selected = nodeId else self:selectOnly(nodeId) end
+end
+
+---@return boolean selected
+function Editor:toggleSelect(nodeId)
+    local on = not self:isSelected(nodeId)
+    self.selection[nodeId] = on or nil
+    if on then self.selected = nodeId elseif self.selected == nodeId then self.selected = next(self.selection) end
+    return on
+end
+
+---@return integer[]
+function Editor:selectedIds()
+    local out = {}
+    for id in pairs(self.selection or {}) do
+        if self.graph ~= nil and self.graph.nodes[id] ~= nil then out[#out + 1] = id end
+    end
+    table.sort(out)
+    return out
+end
+
+-- The selection box selects its starting set plus every node body it overlaps.
+function Editor:updateMarquee()
+    local m = self.marquee
+    local left, right = math.min(m.x0, m.x1), math.max(m.x0, m.x1)
+    local top, bottom = math.min(m.y0, m.y1), math.max(m.y0, m.y1)
+    local sel = {}
+    for id in pairs(m.base) do sel[id] = true end
+    for id, geom in pairs(self.geoms) do
+        local x, y = self.view:ToScreen(geom.x, geom.y)
+        if x <= right and x + self.view:Scale(geom.w) >= left
+            and y <= bottom and y + self.view:Scale(geom.h) >= top then
+            sel[id] = true
+        end
+    end
+    self.selection = sel
+    if not sel[self.selected or false] then self.selected = next(sel) end
+end
+
 function Editor:buildGeoms()
     local connectedIn = {}
     for _, c in ipairs(self.graph:GetConnections()) do
@@ -705,7 +789,9 @@ function Editor:deleteNode(nodeId)
     self.graph:RemoveNode(nodeId)
     self.layout[nodeId] = nil
     self.geoms[nodeId] = nil
-    if self.selected == nodeId then self.selected = nil end
+    local sel = self.selection or {}
+    sel[nodeId] = nil
+    if self.selected == nodeId then self.selected = next(sel) end
     for i, id in ipairs(self.nodeOrder) do
         if id == nodeId then
             table.remove(self.nodeOrder, i)
@@ -734,6 +820,12 @@ function Editor:beginPress()
     if self.colorPopup.open then
         if self.editing ~= nil then self:closeControlEditor() end
         self:handleColorPopupClick(lx, ly)
+        return
+    end
+
+    if self.editToolbar:Contains(lx, ly) then
+        local btn = self.editToolbar:ButtonAt(lx, ly)
+        if btn ~= nil then self:RunEditAction(btn.id) end
         return
     end
 
@@ -780,7 +872,7 @@ function Editor:beginPress()
     if hitMode ~= nil then
         self.pressed = false
         self:positionCapture()
-        self.selected = hitMode
+        self:focusNode(hitMode)
         self:bringToFront(hitMode)
         self:openNodeModeDropdown(hitMode)
         return
@@ -796,7 +888,7 @@ function Editor:beginPress()
     if hitCtrl ~= nil then
         self.pressed = false
         self:positionCapture()
-        self.selected = hitCtrl.nodeId
+        self:focusNode(hitCtrl.nodeId)
         self:bringToFront(hitCtrl.nodeId)
         hitCtrl.ctrl.pinControl.Press(self:controlHost(hitCtrl.nodeId, hitCtrl.ctrl), hitCtrl.ctrl)
         return
@@ -806,32 +898,52 @@ function Editor:beginPress()
     if hitTest ~= nil then
         self.pressed = false
         self:positionCapture()
-        self.selected = hitTest.nodeId
+        self:focusNode(hitTest.nodeId)
         self:bringToFront(hitTest.nodeId)
         self:fireTestPin(hitTest.nodeId, hitTest.tb.pinName)
         return
     end
 
+    local shift = EditorKeys.IsShiftDown()
+
     local hitNode = self:nodeAt(lx, ly)
     if hitNode ~= nil then
-        self.selected = hitNode
+        if shift then
+            -- Shift+click adds or removes one node and does not start a drag.
+            self.pressed = false
+            self:positionCapture()
+            if self:toggleSelect(hitNode) then self:bringToFront(hitNode) end
+            return
+        end
+        self:focusNode(hitNode)
         self:bringToFront(hitNode)
         local pos = self:posOf(hitNode)
         local gx, gy = self.view:ToGraph(lx, ly)
         self.mode = "dragnode"
         self.dragNodeId = hitNode
         self.dragDX, self.dragDY = gx - pos.x, gy - pos.y
+        self.dragOffsets = {}
+        for _, id in ipairs(self:selectedIds()) do
+            local p = self:posOf(id)
+            self.dragOffsets[id] = { dx = gx - p.x, dy = gy - p.y }
+        end
         return
     end
 
-    if dbl then
+    if dbl and not shift then
         self.pressed = false          -- not a drag after all
         self:positionCapture()
         self.lastClickTick = -1000    -- consume so a 3rd click isn't a fresh double
         self:openPaletteUnfiltered(lx, ly)
         return
     end
-    self.selected = nil
+    if shift then
+        -- Shift+drag on empty canvas draws a selection box that adds to the selection.
+        self.marquee = { x0 = lx, y0 = ly, x1 = lx, y1 = ly, base = self.selection }
+        self.mode = "marquee"
+        return
+    end
+    self:clearSelection()
     self.mode = "pan"
 end
 
@@ -861,11 +973,18 @@ function Editor:update()
         self.mode = "idle"
         self.wire = nil
         self.dragNodeId = nil
+        self.dragOffsets = nil
+        self.marquee = nil
         self.colorDragPart = nil
         self.palette.scrollDragging = false
         return
     end
     self.tick = self.tick + 1   -- advances even without a cursor, for double-click timing
+    self.historyTick = self.historyTick + 1
+    if self.historyTick >= HISTORY_TICKS then
+        self.historyTick = 0
+        self:observeHistory()
+    end
     self:syncContentOrigin()
     if self.visible and not self.pressed and not self.palette.open then
         self:positionCapture()
@@ -885,6 +1004,14 @@ function Editor:update()
             local gx, gy = self.view:ToGraph(lx, ly)
             local pos = self:posOf(self.dragNodeId)
             pos.x, pos.y = gx - self.dragDX, gy - self.dragDY
+            for id, off in pairs(self.dragOffsets or {}) do
+                local p = self.layout[id]
+                if p ~= nil then p.x, p.y = gx - off.dx, gy - off.dy end
+            end
+        elseif self.mode == "marquee" and self.marquee ~= nil then
+            local lx, ly = self:toLocal(mx, my)
+            self.marquee.x1, self.marquee.y1 = lx, ly
+            self:updateMarquee()
         elseif self.mode == "colordrag" then
             local lx, ly = self:toLocal(mx, my)
             self.colorPopup:ApplyDrag(self.colorDragPart, lx, ly)
@@ -912,11 +1039,20 @@ function Editor:endPress()
             pos.x = Util.RoundHalfAway(pos.x)
             pos.y = Util.RoundHalfAway(pos.y)
         end
+        for id in pairs(self.dragOffsets or {}) do
+            local p = self.layout[id]
+            if p ~= nil then
+                p.x = Util.RoundHalfAway(p.x)
+                p.y = Util.RoundHalfAway(p.y)
+            end
+        end
     end
 
     self.mode = "idle"
     self.wire = nil
     self.dragNodeId = nil
+    self.dragOffsets = nil
+    self.marquee = nil
     self.colorDragPart = nil
     self.palette.scrollDragging = false
     if not self.palette.open then self:positionCapture() end
@@ -990,7 +1126,7 @@ function Editor:openPaletteUnfiltered(lx, ly, opts)
     })
     self:expandCapture()
     self.mode = "idle"
-    self.selected = nil
+    self:clearSelection()
 end
 
 function Editor:openPaletteFromPlus()
@@ -1069,7 +1205,7 @@ function Editor:placeFromPalette(row)
     -- Store the integer the player sees. A half goes away from zero.
     self.layout[newId] = { x = Util.RoundHalfAway(x), y = Util.RoundHalfAway(y) }
     self:bringToFront(newId)
-    self.selected = newId
+    self:selectOnly(newId)
 
     if connect ~= nil and targetPin ~= nil then
         local src = connect.entry
@@ -1836,7 +1972,7 @@ function Editor:draw()
         if geom ~= nil and self:geomVisible(geom, vx, vy, vw, vh) then
             local editingHere = self.editing ~= nil and self.editing.nodeId == id
             Node.Draw(clipped, self.view, geom, self:meta(id, geom.typeKey),
-                { selected = (id == self.selected),
+                { selected = self:isSelected(id),
                   mouseX = self.mouse.x, mouseY = self.mouse.y,
                   editingPin = editingHere and self.editing.pinName or nil,
                   editingKind = editingHere and self.editing.kind or nil,
@@ -1845,6 +1981,8 @@ function Editor:draw()
     end
 
     self:drawPendingWire()
+    self:drawMarquee(clipped)
+    self.editToolbar:Draw(self.canvas, self:editActionsEnabled(), self.mouse.x, self.mouse.y)
 
     if self.colorPopup.open then
         self.colorPopup:Draw(clipped, vx, vy, vw, vh, self.mouse.x, self.mouse.y,
@@ -1967,9 +2105,10 @@ function Editor:OnShellHide()
     dismissToolbarTooltip(self.backButton)
 end
 
+-- Graph y = 0 starts below the Edit Toolbar, so the top row of nodes is not under it.
 function Editor:resetView()
     self.view.panX = 0
-    self.view.panY = 0
+    self.view.panY = HOME_PAN_Y
     self.view.zoom = 1.0
     self:syncZoomSlider()
 end
@@ -2200,6 +2339,142 @@ function Editor:mountToolbar(overlayParent)
         if self.onSavePreset ~= nil then self.onSavePreset() end
     end)
     self:layoutToolbar()
+end
+
+--- Edit actions ------------------------------------------------------------------------
+
+-- Shared by every editor so a copy can be pasted into another alert. The client has no
+-- clipboard API, so it lasts until a reload.
+Editor.clipboard = nil
+
+function Editor:drawMarquee(canvas)
+    local m = self.marquee
+    if m == nil then return end
+    local x, y = math.min(m.x0, m.x1), math.min(m.y0, m.y1)
+    local w, h = math.abs(m.x1 - m.x0), math.abs(m.y1 - m.y0)
+    canvas:AddRectangle(x, y, w, h, Theme.Vec4(Theme.COL_MARQUEE_FILL))
+    canvas:AddOutline(x, y, w, h, 1, Theme.Vec4(Theme.COL_NODE_SEL))
+end
+
+function Editor:editActionsEnabled()
+    local any = #self:selectedIds() > 0
+    return {
+        undo = self.history:CanUndo(), redo = self.history:CanRedo(),
+        cut = any, copy = any, delete = any, paste = Editor.clipboard ~= nil,
+    }
+end
+
+---@param action string  # "undo" | "redo" | "cut" | "copy" | "paste" | "delete"
+---@return boolean ran
+function Editor:RunEditAction(action)
+    if self.graph == nil or dialogOpen(self) then return false end
+    -- Commit an open field and record any pending edit, so it is its own undo step.
+    if self.editing ~= nil then self:closeControlEditor() end
+    self:closeColorPopup()
+    if self.palette.open then self:closePalette() end
+    self:observeHistory()
+    if not self:editActionsEnabled()[action] then return false end
+    local ids = self:selectedIds()
+    if action == "undo" or action == "redo" then
+        local snap = self:captureAll()
+        local target = action == "undo" and self.history:Undo(snap) or self.history:Redo(snap)
+        NodeSnapshot.Restore(self.graph, self.registry, self.layout, target, self.history.alias,
+            function(id) self:deleteNode(id) end)
+        self:clearSelection()
+        self.history:Settle(self:captureAll())
+        return true
+    end
+    if action == "copy" or action == "cut" then
+        local only = {}
+        for _, id in ipairs(ids) do only[id] = true end
+        local snap = NodeSnapshot.Capture(self.graph, self.layout, only, true)
+        if #snap.nodes == 0 then return false end
+        Editor.clipboard, self.lastPaste = snap, nil
+        if action == "cut" then self:removeNodes(ids) end
+    elseif action == "paste" then
+        self:paste()
+    elseif #ids > 1 and self.overlayParent ~= nil then
+        Confirm.mount(self.overlayParent, {
+            title = "CONFIRM DELETE", confirmLabel = "DELETE", confirmVariant = "negative",
+            body = string.format("Delete %d selected nodes and their wires?", #ids),
+            onConfirm = function() self:removeNodes(ids) end,
+        })
+    else
+        self:removeNodes(ids)
+    end
+    self:observeHistory()
+    return true
+end
+
+-- Content-local cursor when it is over the editor, else nil.
+function Editor:mouseInView()
+    local mx, my = self:mousePos()
+    if mx == nil then return nil end
+    local lx, ly = self:toLocal(mx, my)
+    if lx < 0 or ly < 0 or lx > self.window.w or ly > self.window.h then return nil end
+    return lx, ly
+end
+
+-- The game also gets the key, so act only with the cursor over the editor and no field open.
+---@return boolean handled
+function Editor:HandleKey(keyEvent)
+    if not self.visible or self.pressed or self.editing ~= nil or self.colorPopup.open then return false end
+    local action = EditorKeys.ActionFor(keyEvent)
+    return action ~= nil and self:mouseInView() ~= nil and self:RunEditAction(action)
+end
+
+-- Pastes under the cursor (or at the view center); a repeat at the same spot steps down-right.
+function Editor:paste()
+    local lx, ly = self:mouseInView()
+    local gx, gy
+    if lx ~= nil and not self.editToolbar:Contains(lx, ly) then
+        gx, gy = self.view:ToGraph(lx, ly)
+    else
+        gx, gy = self:viewCenterGraph()
+    end
+    gx, gy = Util.RoundHalfAway(gx), Util.RoundHalfAway(gy)
+    local last = self.lastPaste
+    local count = (last ~= nil and last.gx == gx and last.gy == gy) and last.count + 1 or 0
+    self.lastPaste = { gx = gx, gy = gy, count = count }
+    local ids = NodeSnapshot.Paste(self.graph, self.registry, self.layout, Editor.clipboard,
+        gx + count * PASTE_STEP, gy + count * PASTE_STEP,
+        function(typeKey) return Gates.Reason(typeKey) == nil end)
+    self:clearSelection()
+    for _, id in ipairs(ids) do
+        self.selection[id] = true
+        self.selected = id
+        self:bringToFront(id)
+    end
+end
+
+function Editor:removeNodes(ids)
+    for _, id in ipairs(ids) do
+        if self.graph.nodes[id] ~= nil then self:deleteNode(id) end
+    end
+end
+
+--- Edit history: a step is recorded whenever the graph differs from the last snapshot while
+--- nothing is held or open (ADR-0021).
+
+function Editor:captureAll()
+    return (NodeSnapshot.Capture(self.graph, self.layout))
+end
+
+function Editor:resetHistory()
+    self.historyTick = 0
+    if self.graph == nil then return self.history:Reset(nil) end
+    -- Lay out and round every node now, so the first draw and save are not steps.
+    for _, n in ipairs(self.graph:GetNodes()) do self:posOf(n.id) end
+    self:GetLayout()
+    self.history:Reset(self:captureAll())
+end
+
+function Editor:observeHistory()
+    if self.graph == nil or self.pressed or self.editing ~= nil or self._modeEditStash ~= nil
+        or self.colorPopup.open or dialogOpen(self) then
+        return
+    end
+    self.history:Observe(self:captureAll())
 end
 
 function Editor:goBack()

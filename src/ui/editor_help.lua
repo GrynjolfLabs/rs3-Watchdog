@@ -58,6 +58,19 @@ function EditorHelp.fill(win)
         "Triangles (exec in pins) on the left have a green square with a play mark beside them. Click it and it runs once. This is a good way to test your alerts.",
     })
 
+    section(win, "Selecting and editing", {
+        "Click a node to select it. Shift+click adds a node to the selection or takes it out.",
+        "Shift+drag on empty space draws a box. Every node it touches joins the selection.",
+        "Drag any selected node and the whole selection moves with it.",
+        "The bar at the top left has Undo, Redo, Cut, Copy, Paste, and Delete.",
+        "With the cursor over the editor, Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes, Ctrl+X cuts, Ctrl+C copies, Ctrl+V pastes, and Delete removes the selection.",
+        "The game also sees these keys. Keep the cursor over the editor when you use them.",
+        "Paste puts the copy under the cursor, with the wires between the copied nodes. Wires to nodes that were not copied are left out.",
+        "Copies stay until you copy again or reload the plugin, so you can paste into a different alert.",
+        "Deleting two or more nodes asks first. Undo brings deleted nodes back.",
+        "Undo covers this alert since you opened it. Opening another alert starts again.",
+    })
+
     section(win, "A first alert", {
         "Under Trigger, choose Game Message. It runs when the game prints a chat line.",
         "Type a word into Message contains to match only lines with that word. Leave it empty and every line of the chosen type matches.",
